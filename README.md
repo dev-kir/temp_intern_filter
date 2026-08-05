@@ -90,8 +90,9 @@ The output Excel has **three sheets**:
 - Organisation Name, Parent Company, Organisation Type, Organisation Size, Stakeholder Category, PDCS Sector, District, Part of Group
 - Role Level, Department, Age Band, Job Title (aggregated with ` | `)
 
-**Right side (74 columns):** One column per question, grouped by section
+**Right side (37 columns):** One column per question, grouped by 8 sections
 - Each cell shows all unique answers from that org's participants, joined with ` | `
+- **BM answers are merged into EN columns** — e.g. answers from "Latar Belakang" appear in the "Background" column alongside English answers
 
 ### Sheet 2: `Scorecard` — Numerical scores (measure performance)
 
@@ -109,21 +110,27 @@ This is the sheet to use for **evaluating whole-company performance**.
 | AI Implementation & Potential Impact | Average score for AI Impact section (0–4) |
 | **OVERALL** | Average across all 7 scored sections — **the single number to rank orgs** |
 
-#### Scoring Formula
+#### Scoring Formula (including BM merging)
 
 ```
-For each question:
-  - Each participant's answer has a score (0–4, where 4 = best)
-  - If multiple participants answered the same question, their scores are averaged
+Step 1 — BM→EN merge:
+  BM sections (e.g. "Latar Belakang") are mapped to EN sections (e.g. "Background")
+  using the same question_id. Scores from both languages are combined.
 
-For each section:
+Step 2 — Per question:
+  Each participant's answer has a score (0–4, where 4 = best).
+  If multiple participants (EN + BM) answered the same question, their scores are averaged.
+
+Step 3 — Per section:
   Section Score = SUM(question_averages) / COUNT(questions_in_section)
 
-For the OVERALL:
-  OVERALL = SUM(all_participant_scores) / COUNT(all_participant_scores)
+Step 4 — OVERALL:
+  OVERALL = SUM(all participant scores from EN + BM) / COUNT(all participant scores)
 ```
 
 **Note:** `background_1` through `background_4` are **demographic questions** (not performance-scored). All their scores are 0 in the raw data, so they are excluded from the Scorecard. Only 7 sections with real 0–4 scoring are included.
+
+**Note on weightage:** The source Excel has **no per-question weight column**. All scored questions have `max_score=4` and are equally weighted. If you need custom weights per question, you can add a `QUESTION_WEIGHTS` config in `super_filter.py`.
 
 - Scores are **0–4 scale** (higher = better AI maturity)
 - Cells have **color scale**: red (low) → yellow (mid) → green (high)
