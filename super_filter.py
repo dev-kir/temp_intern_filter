@@ -125,6 +125,52 @@ SCORECARD_SECTIONS = [
     "AI Implementation & Potential Impact",
 ]
 
+# ── Question weightage (default = 1.0 for all) ──
+# Higher weight = more important. Set to 0 to exclude a question entirely.
+# Comment out or set to 1.0 to use equal weighting.
+QUESTION_WEIGHTS = {
+    # Strategy & Leadership
+    "strategy_1": 1.0,
+    "strategy_2": 1.0,
+    "strategy_3": 1.0,
+    "strategy_4": 1.0,
+    # Talent & Organisational Culture
+    "talent_1": 1.0,
+    "talent_2": 1.0,
+    "talent_3": 1.0,
+    "talent_4": 1.0,
+    # Data Management & Readiness
+    "data_1": 1.0,
+    "data_2": 1.0,
+    "data_3": 1.0,
+    "data_4": 1.0,
+    "data_5": 1.0,
+    # Infrastructure & Technology
+    "infrastructure_1": 1.0,
+    "infrastructure_2": 1.0,
+    "infrastructure_3": 1.0,
+    "infrastructure_4": 1.0,
+    "infrastructure_5": 1.0,
+    # Governance, Policy & Ethics
+    "governance_1": 1.0,
+    "governance_2": 1.0,
+    "governance_3": 1.0,
+    "governance_4": 1.0,
+    "governance_5": 1.0,
+    "governance_6": 1.0,
+    # Investment
+    "investment_1": 1.0,
+    "investment_2": 1.0,
+    "investment_3": 1.0,
+    "investment_4": 1.0,
+    # AI Implementation & Potential Impact
+    "aiapp_1": 1.0,
+    "aiapp_2": 1.0,
+    "aiapp_3": 1.0,
+    "aiapp_4": 1.0,
+    "aiapp_5": 1.0,
+}
+
 # ═══════════════════════════════════════════════════════════════════════════
 # PROCESSING LOGIC
 # ═══════════════════════════════════════════════════════════════════════════
@@ -394,13 +440,18 @@ def write_pivot_sheet(wb, orgs: dict, questions: list[tuple]):
 
 def compute_section_scores(orgs: dict, questions: list[tuple]) -> dict:
     """
-    For each org, compute the average score per section and overall.
+    For each org, compute the weighted average score per section and overall.
+    Uses QUESTION_WEIGHTS from config.
+
+    Formula:
+      Section Score = SUM(q_avg × weight) / SUM(weights)  for all questions in section
+      OVERALL       = SUM(score × weight) / SUM(weights)  for all individual scores
+
     Returns: dict[org_name] -> {
         "section_scores": {section_name: average_score},
         "overall_score": float,
     }
     """
-    # Build mapping: section -> list of question_ids
     section_qids = defaultdict(list)
     for sec, qid, qnum, qtext in questions:
         if sec in SCORECARD_SECTIONS:
@@ -409,23 +460,27 @@ def compute_section_scores(orgs: dict, questions: list[tuple]) -> dict:
     result = {}
     for org_name, o in orgs.items():
         section_scores = {}
-        all_scores = []
+        all_weighted = 0.0
+        total_weight = 0.0
 
         for sec in SCORECARD_SECTIONS:
-            sec_total = 0.0
-            sec_count = 0
+            sec_weighted = 0.0
+            sec_weight_sum = 0.0
             for qid in section_qids.get(sec, []):
                 score_list = o["scores"].get((sec, qid), [])
                 if score_list:
-                    # Average across all participants for this question
                     q_avg = sum(s for s, _ in score_list) / len(score_list)
-                    sec_total += q_avg
-                    sec_count += 1
-                    all_scores.extend(s for s, _ in score_list)
+                    w = QUESTION_WEIGHTS.get(qid, 1.0)
+                    sec_weighted += q_avg * w
+                    sec_weight_sum += w
+                    # For overall: weight each individual score
+                    for s, _ in score_list:
+                        all_weighted += s * w
+                        total_weight += w
 
-            section_scores[sec] = round(sec_total / sec_count, 2) if sec_count > 0 else None
+            section_scores[sec] = round(sec_weighted / sec_weight_sum, 2) if sec_weight_sum > 0 else None
 
-        overall = round(sum(all_scores) / len(all_scores), 2) if all_scores else None
+        overall = round(all_weighted / total_weight, 2) if total_weight > 0 else None
         result[org_name] = {
             "section_scores": section_scores,
             "overall_score": overall,

@@ -5,41 +5,21 @@ A Python script that reads the raw SARI survey Excel export and produces **3 she
 | Sheet | Purpose |
 |---|---|
 | **Pivot** | One row per org, 37 question columns — see what each org answered |
-| **Scorecard** | One row per org, per-section average scores + **OVERALL** — measure performance |
+| **Scorecard** | One row per org, per-section weighted scores + **OVERALL** — measure performance |
 | **Question Reference** | Maps question IDs to full question text |
 
-## Algorithm (Simple English)
+> For full step-by-step algorithm, formulas, data flow diagram, and edge cases, see **[ALGORITHM.md](ALGORITHM.md)**.
 
-Here's what the script does, step by step:
+## Quick Summary
 
 ```
-1. READ the raw Excel file (6,771 rows, each row = one person's answer to one question)
-
-2. For each row, if the section is in Bahasa Malaysia (e.g. "Latar Belakang"),
-   MAP it to the English section (e.g. "Background") using the same question_id.
-   This merges BM and EN answers together.
-
-3. GROUP all rows by Organisation Name (126 unique orgs)
-
-4. For each organisation, collect:
-   - Single-value fields: take the first value (Org Type, Size, Sector, etc.)
-   - Multi-value fields: collect ALL unique values (Role Level, Department, etc.)
-   - Question answers: collect ALL unique answers per (section, question_id)
-   - Question scores: collect ALL scores per (section, question_id)
-
-5. BUILD the Pivot sheet:
-   - One row per organisation
-   - Left side: org info columns
-   - Right side: one column per question (37 columns, grouped by 8 sections)
-   - Each cell = all unique answers joined with " | "
-
-6. BUILD the Scorecard sheet:
-   - One row per organisation
-   - For each section: average of all question scores in that section
-   - OVERALL: average of ALL individual participant scores
-   - Color scale: red (low) → yellow → green (high)
-
-7. SAVE to a new Excel file with 3 sheets
+1. READ raw Excel (6,771 rows)
+2. MERGE BM answers into EN sections (same question_id)
+3. GROUP by Organisation Name (126 orgs)
+4. BUILD Pivot sheet — one row per org, answers in columns
+5. COMPUTE weighted scores per section + OVERALL
+6. BUILD Scorecard sheet with color scale
+7. SAVE to output Excel
 ```
 
 - **Each row = one organisation** (126 rows, no duplicates)
@@ -125,27 +105,29 @@ This is the sheet to use for **evaluating whole-company performance**.
 | AI Implementation & Potential Impact | Average score for AI Impact section (0–4) |
 | **OVERALL** | Average across all 7 scored sections — **the single number to rank orgs** |
 
-#### Scoring Formula (including BM merging)
+#### Scoring Formula (with weightage)
 
 ```
 Step 1 — BM→EN merge:
-  BM sections (e.g. "Latar Belakang") are mapped to EN sections (e.g. "Background")
-  using the same question_id. Scores from both languages are combined.
+  BM sections are mapped to EN sections using the same question_id.
+  Scores from both languages are combined.
 
-Step 2 — Per question:
-  Each participant's answer has a score (0–4, where 4 = best).
-  If multiple participants (EN + BM) answered the same question, their scores are averaged.
+Step 2 — Per question average:
+  q_avg = SUM(all participant scores for this question) / COUNT(participants)
 
-Step 3 — Per section:
-  Section Score = SUM(question_averages) / COUNT(questions_in_section)
+Step 3 — Per section (weighted):
+  Section Score = SUM(q_avg_i × weight_i) / SUM(weight_i)
 
-Step 4 — OVERALL:
-  OVERALL = SUM(all participant scores from EN + BM) / COUNT(all participant scores)
+Step 4 — OVERALL (weighted):
+  OVERALL = SUM(score_j × weight_j) / SUM(weight_j)
+  (weighted average of ALL individual participant scores)
 ```
 
-**Note:** `background_1` through `background_4` are **demographic questions** (not performance-scored). All their scores are 0 in the raw data, so they are excluded from the Scorecard. Only 7 sections with real 0–4 scoring are included.
+**Weightage:** Configured in `QUESTION_WEIGHTS` at the top of `super_filter.py`. Default = 1.0 for all questions. Set higher for more important questions, 0 to exclude.
 
-**Note on weightage:** The source Excel has **no per-question weight column**. All scored questions have `max_score=4` and are equally weighted. If you need custom weights per question, you can add a `QUESTION_WEIGHTS` config in `super_filter.py`.
+**Background excluded:** `background_1`–`background_4` are demographic (all score=0), excluded from Scorecard.
+
+> See **[ALGORITHM.md](ALGORITHM.md)** for full step-by-step details, data flow diagram, and edge cases.
 
 - Scores are **0–4 scale** (higher = better AI maturity)
 - Cells have **color scale**: red (low) → yellow (mid) → green (high)
@@ -276,9 +258,10 @@ SCORECARD_SECTIONS = [
 ```
 ammar_super_filter/
 ├── super_filter.py                          # CLI processing script
-├── app.py                                   # Streamlit GUI app
+├── app.py                                   # Desktop GUI app (Tkinter)
 ├── requirements.txt                         # Python dependencies (pinned versions)
-├── README.md                                # This file
+├── README.md                                # This file — quick start & overview
+├── ALGORITHM.md                             # Full algorithm docs, formulas, data flow
 ├── Super_Filter.md                          # Original design brief
 ├── .gitignore                               # Ignore venv, cache, output files
 ├── venv/                                    # Virtual environment (not in git)
