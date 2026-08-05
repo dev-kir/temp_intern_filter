@@ -4,15 +4,29 @@ Reads a SARI survey Excel export (Answers + Scores sheets) and produces a **10-s
 
 ## Download
 
-**Ready-to-run builds** (no Python install needed):
+**Ready-to-run builds, no Python needed** — [**Releases**](https://github.com/dev-kir/temp_intern_filter/releases/latest)
 
-- **macOS:** [Super Filter.zip](https://github.com/dev-kir/temp_intern_filter/raw/main/Super%20Filter.zip) — download, unzip, double-click `Super Filter.app`
-- **Windows:** Run `build.sh` on a Mac to produce the `.app`, or build locally on Windows with PyInstaller:
+| You use | Download | Then |
+|---|---|---|
+| Windows | `SuperFilter-windows.zip` | unzip the folder, run `SuperFilter.exe` |
+| macOS | `SuperFilter-macos.zip` | unzip, right-click `Super Filter.app` → *Open* |
 
-  ```bash
-  pip install pyinstaller
-  pyinstaller --windowed --onedir --name "Super Filter" --icon icon.png --add-data "report_template.xlsx:." --hidden-import=tkinterdnd2 app.py
-  ```
+Unzip the **whole folder** before running — the executable needs its libraries and `report_template.xlsx` beside it. First launch warns because the build is unsigned: on Windows *More info* → *Run anyway*, on macOS right-click → *Open*.
+
+Both builds are produced automatically by `.github/workflows/build.yml`. PyInstaller cannot cross-compile, so the `.exe` is built on a Windows runner and the `.app` on a macOS one, from the same `app.py`. To cut a new version:
+
+```bash
+git tag v1.0.1 && git push origin v1.0.1
+```
+
+> The built app is ~62 MB zipped, which is why it lives in Releases and not in the repository. GitHub warns over 50 MB per file and refuses over 100 MB.
+
+Building it yourself, on the platform you are targeting:
+
+```bash
+pip install -r requirements.txt pyinstaller
+pyinstaller app.spec --noconfirm
+```
 
 ## Quick Start (from source)
 

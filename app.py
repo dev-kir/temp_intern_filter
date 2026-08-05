@@ -101,79 +101,120 @@ def score_color(value):
 #  Custom grid table
 # ───────────────────────────────────────────────────────────────────────
 
-class GridTable:
+ROW_H = 30        # px, every row and the header
+CELL_PAD = 10     # px of breathing room inside a cell
+
+
+def _cell(parent, text, width, anchor, bg, fg, font, cursor=None):
+    """One table cell of an exactly fixed pixel width.
+
+    The label goes inside a Frame with pack_propagate off, so a long organisation
+    name is clipped by its column instead of widening it. That is what keeps the
+    header lined up with the rows: a column is `width` px everywhere, in the header
+    and in all 124 rows, no matter what text lands in it.
     """
-    Plain Frame of GridRow children. Each row is a Frame of fixed-width
-    Label cells. Entire table lives inside a Canvas so a long list scrolls
-    vertically without distorting the column widths.
+    holder = tk.Frame(parent, width=width, height=ROW_H, bg=bg)
+    holder.pack_propagate(False)
+    holder.pack(side=tk.LEFT)
+    lbl = tk.Label(holder, text=text, bg=bg, fg=fg, font=font, anchor=anchor)
+    lbl.pack(fill=tk.BOTH, expand=True, padx=CELL_PAD)
+    if cursor:
+        holder.configure(cursor=cursor)
+        lbl.configure(cursor=cursor)
+    return holder, lbl
+
+
+class GridTable:
+    """Header row plus a scrolling body, both laid out from the same width list.
+
+    Previously the header was one grid and every row was its own grid, so each
+    computed column widths independently from its own content and nothing lined up.
+    Widths now come only from COLUMNS and are enforced per cell.
     """
 
     def __init__(self, parent, columns, on_click=None):
         self.columns = columns
         self.on_click = on_click
-        self.rows = []            # list of (row_data, frame, label_widgets)
+        self.total_width = sum(c[2] for c in columns)
 
         outer = tk.Frame(parent, bg=WHITE)
         outer.pack(fill=tk.BOTH, expand=True)
 
-        # Header row
-        header = tk.Frame(outer, bg=WHITE)
-        header.pack(fill=tk.X)
-        self._draw_header(header)
+        # Header, pinned above the scrolling area
+        self.header = tk.Frame(outer, bg=WHITE, height=ROW_H)
+        self.header.pack(fill=tk.X, anchor="w")
+        self.header.pack_propagate(False)
+        self._draw_header()
 
-        # Hairline divider under the header (the only one in the table)
         tk.Frame(outer, bg=LINE, height=1).pack(fill=tk.X)
 
-        # Scrollable body
-        self.canvas = tk.Canvas(outer, bg=WHITE, highlightthickness=0, bd=0)
-        vsb = ttk.Scrollbar(outer, orient=tk.VERTICAL, command=self.canvas.yview)
-        self.canvas.configure(yscrollcommand=vsb.set)
+        body_wrap = tk.Frame(outer, bg=WHITE)
+        body_wrap.pack(fill=tk.BOTH, expand=True)
+
+        self.canvas = tk.Canvas(body_wrap, bg=WHITE, highlightthickness=0, bd=0)
+        self.vsb = ttk.Scrollbar(body_wrap, orient=tk.VERTICAL, command=self.canvas.yview)
+        self.canvas.configure(yscrollcommand=self.vsb.set)
         self.canvas.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
-        vsb.pack(side=tk.RIGHT, fill=tk.Y)
+        self.vsb.pack(side=tk.RIGHT, fill=tk.Y)
 
         self.body = tk.Frame(self.canvas, bg=WHITE)
         self.body_id = self.canvas.create_window((0, 0), window=self.body, anchor="nw")
-        self.body.bind("<Configure>", lambda e: self.canvas.configure(scrollregion=self.canvas.bbox("all")))
-        self.canvas.bind("<Configure>", self._resize_body)
+        self.body.bind("<Configure>", self._on_body_configure)
+        self.canvas.bind("<Configure>", self._on_canvas_configure)
+        self._bind_wheel(self.canvas)
 
-    def _resize_body(self, event):
-        # Make the inner frame match the canvas width so the scrolling region is right
-        self.canvas.itemconfigure(self.body_id, width=event.width)
+    def _on_body_configure(self, _event=None):
+        self.canvas.configure(scrollregion=self.canvas.bbox("all"))
 
-    def _draw_header(self, frame):
-        for i, (label, idx, width, anchor) in enumerate(self.columns):
-            lbl = tk.Label(frame, text=label, font=("Calibri", 10, "bold"),
-                           bg=WHITE, fg=GREY, anchor=anchor, padx=8, pady=8)
-            lbl.grid(row=0, column=i, sticky="w" if anchor == tk.W else "e", padx=4)
-            # Mousewheel sort header
+    def _on_canvas_configure(self, event):
+        # A frame placed with create_window keeps its own requested width, which for
+        # an empty container is 1px. Rows packed inside then have nothing to fill and
+        # collapse. Give it at least the width of the columns, more if the window is
+        # wider, so the row stripes run the full width.
+        self.canvas.itemconfigure(self.body_id, width=max(event.width, self.total_width))
+
+    def _bind_wheel(self, widget):
+        # macOS delivers small integer deltas; Windows and X11 send multiples of 120.
+        def on_wheel(e):
+            if e.num == 4:      delta = -3
+            elif e.num == 5:    delta = 3
+            elif abs(e.delta) >= 120: delta = int(-e.delta / 120) * 3
+            else:               delta = -e.delta
+            self.canvas.yview_scroll(int(delta), "units")
+            return "break"
+        for seq in ("<MouseWheel>", "<Button-4>", "<Button-5>"):
+            widget.bind_all(seq, on_wheel)
+
+    def _draw_header(self):
+        for label, idx, width, anchor in self.columns:
+            holder, lbl = _cell(self.header, label, width, anchor, WHITE, GREY,
+                                ("Calibri", 10, "bold"),
+                                cursor="hand2" if self.on_click else None)
             if self.on_click:
-                lbl.bind("<Button-1>", lambda e, c=idx, l=label: self.on_click(c, l))
-                lbl.configure(cursor="hand2")
+                for w in (holder, lbl):
+                    w.bind("<Button-1>", lambda e, c=idx, l=label: self.on_click(c, l))
 
     def set_rows(self, rows_data):
         for w in self.body.winfo_children():
             w.destroy()
-        self.rows = []
+
         for r, row in enumerate(rows_data):
             bg = STRIPE if r % 2 else WHITE
+            # No pack_propagate(False) here: the row takes its height from the cells
+            # and stretches to the body width, so the stripe runs the full row.
             rowframe = tk.Frame(self.body, bg=bg)
-            rowframe.pack(fill=tk.X)
-            label_widgets = []
+            rowframe.pack(fill=tk.X, anchor="w")
             for i, (label, idx, width, anchor) in enumerate(self.columns):
-                text = fmt(row[idx], idx)
-                fg = TEXT
-                font = ("Calibri", 11)
+                fg, font = TEXT, ("Calibri", 11)
                 if i == OVERALL_COL:
                     col = score_color(row[RAW_OVERALL_IDX])
                     if col is not None:
-                        fg = col
-                        font = ("Calibri", 11, "bold")
-                cell = tk.Label(rowframe, text=text, font=font, bg=bg, fg=fg,
-                                anchor=anchor, padx=8, pady=6)
-                cell.grid(row=0, column=i, sticky="we", padx=4)
-                label_widgets.append(cell)
-                rowframe.grid_columnconfigure(i, weight=1 if anchor == tk.W else 0, minsize=width)
-            self.rows.append((row, rowframe, label_widgets))
+                        fg, font = col, ("Calibri", 11, "bold")
+                _cell(rowframe, fmt(row[idx], idx), width, anchor, bg, fg, font)
+
+        self.body.update_idletasks()
+        self._on_body_configure()
+        self.canvas.yview_moveto(0)
 
 
 # ───────────────────────────────────────────────────────────────────────
@@ -196,30 +237,18 @@ class SuperFilterApp:
         self.busy = False
         self.table = None
 
-        # Everything lives in ONE scrollable surface so the title and toolbar
-        # scroll with the table — no fixed top bar.
-        outer = tk.Frame(self.root, bg=WHITE)
-        outer.pack(fill=tk.BOTH, expand=True)
+        # Title, toolbar and status stay put; only the table body scrolls. Wrapping
+        # the whole window in a Canvas made the table claim its natural height inside
+        # an already-scrolling parent, which is why it filled only the top half and
+        # its own scrollbar did nothing.
+        self.body = tk.Frame(self.root, bg=WHITE)
+        self.body.pack(fill=tk.BOTH, expand=True)
 
-        self.canvas = tk.Canvas(outer, bg=WHITE, highlightthickness=0, bd=0)
-        vsb = ttk.Scrollbar(outer, orient=tk.VERTICAL, command=self.canvas.yview)
-        self.canvas.configure(yscrollcommand=vsb.set)
-        self.canvas.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
-        vsb.pack(side=tk.RIGHT, fill=tk.Y)
-
-        self.body = tk.Frame(self.canvas, bg=WHITE)
-        self.body_id = self.canvas.create_window((0, 0), window=self.body, anchor="nw")
-        self.body.bind("<Configure>", lambda e: self.canvas.configure(scrollregion=self.canvas.bbox("all")))
-        self.canvas.bind("<Configure>", lambda e: self.canvas.itemconfigure(self.body_id, width=e.width))
-
-        # Title — scrolls with the content
         tk.Label(self.body, text="Organisation Summary", font=("Calibri", 18, "bold"),
                  bg=WHITE, fg=NAVY, anchor=tk.W).pack(fill=tk.X, padx=14, pady=(14, 0))
 
-        # Toolbar — scrolls with the content
         self._build_toolbar()
 
-        # Main content area
         self.main = tk.Frame(self.body, bg=WHITE)
         self.main.pack(fill=tk.BOTH, expand=True, padx=14, pady=(10, 14))
         self._show_dropzone()
@@ -334,15 +363,17 @@ class SuperFilterApp:
         for w in self.main.winfo_children():
             w.destroy()
 
+        # The count line claims its strip at the bottom first, so the table gets
+        # every remaining pixel instead of being squeezed by a later sibling.
+        self.count_lbl = tk.Label(self.main, text="", font=("Calibri", 9),
+                                  bg=WHITE, fg=GREY, anchor=tk.W)
+        self.count_lbl.pack(side=tk.BOTTOM, fill=tk.X, pady=(6, 0))
+
         wrap = tk.Frame(self.main, bg=WHITE)
-        wrap.pack(fill=tk.BOTH, expand=True)
+        wrap.pack(side=tk.TOP, fill=tk.BOTH, expand=True)
 
         self.table = GridTable(wrap, COLUMNS, on_click=self._sort_by)
         self._refresh()
-
-        self.count_lbl = tk.Label(self.main, text="", font=("Calibri", 9),
-                                   bg=WHITE, fg=GREY, anchor=tk.W)
-        self.count_lbl.pack(fill=tk.X, pady=(6, 0))
 
     def _refresh(self):
         if self.data is None or self.table is None:

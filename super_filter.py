@@ -81,8 +81,27 @@ def rewrite(ws, headers, rows, start=5, add_filter=True):
     # where the data ends instead of trailing dozens of blank styled rows.
     last=start+len(rows)-1
     if ws.max_row>last: ws.delete_rows(last+1,ws.max_row-last)
-    if add_filter:
-        ws.auto_filter.ref=f'A{start-1}:{ws.cell(start-1,max_col).column_letter}{last}'
+    span=f'A{start-1}:{ws.cell(start-1,max_col).column_letter}{last}'
+
+    # Four sheets carry an Excel Table (ListObject) from the template. Two things
+    # about them cause the "Excel was able to open the file by repairing or removing
+    # the unreadable content" dialog, and both are handled here:
+    #
+    #   1. A Table owns its own autoFilter. Adding a second, sheet-level autoFilter
+    #      to the same sheet is invalid, so Excel repairs the file by deleting the
+    #      Table. This fired on Section Summary on every single export.
+    #   2. The template's table refs are frozen to the row counts of the dataset it
+    #      was built from (A4:L872 and friends). Any survey with a different number
+    #      of rows leaves the ref pointing past the data. openpyxl does not move
+    #      them, and delete_rows above does not either, so re-point them explicitly.
+    tables=list(getattr(ws,'tables',{}).values())
+    if tables:
+        for tbl in tables:
+            tbl.ref=span
+            if tbl.autoFilter is not None: tbl.autoFilter.ref=span
+        ws.auto_filter.ref=None
+    elif add_filter:
+        ws.auto_filter.ref=span
 
 def read_source(path):
     wb=load_workbook(path,read_only=True,data_only=True)
