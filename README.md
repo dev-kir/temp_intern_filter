@@ -1,270 +1,82 @@
-# Super Filter — SARI Survey Results Processor
+# Super Filter — SARI Organisation Statistics Generator
 
-A Python script that reads the raw SARI survey Excel export and produces **3 sheets**:
+Reads a SARI survey Excel export and produces a **10-sheet interactive workbook** matching the `SARI_Organisation.xlsx` format.
 
-| Sheet | Purpose |
-|---|---|
-| **Pivot** | One row per org, 37 question columns — see what each org answered |
-| **Scorecard** | One row per org, per-section weighted scores + **OVERALL** — measure performance |
-| **Question Reference** | Maps question IDs to full question text |
+## Output Sheets
 
-> For full step-by-step algorithm, formulas, data flow diagram, and edge cases, see **[ALGORITHM.md](ALGORITHM.md)**.
+| # | Sheet | Purpose |
+|---|---|---|
+| 1 | **Read Me** | Info & purpose |
+| 2 | **Lists** | All organisation names (for dropdowns) |
+| 3 | **Dashboard** | Interactive org selector with live formulas |
+| 4 | **Organisation Report** | Per-org report with priority questions |
+| 5 | **Organisation Summary** | One row per org — scores, maturity tier, agreement |
+| 6 | **Section Summary** | Per org × section — avg/median/min/max/normalised |
+| 7 | **Question Summary** | Per org × question — consensus, std dev, review flags |
+| 8 | **Answer Distribution** | Per org × question × answer option — counts & % |
+| 9 | **Raw Answers** | Raw data with Standard section (BM→EN merged) |
+| 10 | **Priority Detail** | Priority-ranked questions per org (low score first) |
 
-## Quick Summary
-
-```mermaid
-flowchart LR
-    A["📂 Raw Excel\n6,771 rows"] --> B["🔀 BM→EN Merge\n8 section mappings"]
-    B --> C["🏢 Group by Org\n126 orgs"]
-    C --> D["📊 Pivot Sheet\n1 row per org\n37 question columns"]
-    C --> E["📈 Scorecard\nWeighted scores\n0–4 + OVERALL"]
-    D --> F["💾 Output Excel\n3 sheets"]
-    E --> F
-```
-
-- **Each row = one organisation** (126 rows, no duplicates)
-- When multiple participants give different answers, they are joined with ` | `
-- Scorecard has **color scale** (red→yellow→green) for quick visual comparison
-
-## Setup & Run
-
-### CLI version (command line)
+## Quick Start
 
 ```bash
-# 1. Create virtual environment
+# Setup
 python3 -m venv venv
-
-# 2. Activate it
-source venv/bin/activate        # macOS / Linux
-# venv\Scripts\activate         # Windows
-
-# 3. Install dependencies
+source venv/bin/activate
 pip install -r requirements.txt
 
-# 4. Run
+# Run
 python super_filter.py
 ```
 
-### GUI version (desktop app)
+**Config:** Edit `INPUT_FILE` and `OUTPUT_FILE` at the top of `super_filter.py`.
 
-```bash
-source venv/bin/activate
-python app.py
-```
+## Key Metrics
 
-Opens a native desktop window. Features:
-- **Open Excel** via file picker
-- **Toggle org columns** on/off (checkboxes in sidebar)
-- **Toggle scorecard sections** on/off
-- **Custom question weightage** (0–10 per question)
-- **Search/filter** by organisation name
-- **3 tabs**: Pivot Table, Scorecard, Question Reference
-- **Export to Excel** with current settings
-
-> **macOS note:** If you get `ModuleNotFoundError: No module named '_tkinter'`, run:
-> ```bash
-> brew install python-tk@3.14
-> ```
-> **Windows:** Tkinter is included with the Python installer — no extra steps needed.
-
-The output file `SARI_Results_Processed.xlsx` will appear in the same folder.
-
-## Output Structure
-
-The output Excel has **three sheets**:
-
-### Sheet 1: `Pivot` — Text answers (what each org said)
-
-| Row | Content |
-|---|---|
-| Row 1 | **Section group headers** (merged cells, e.g. "Background", "Strategy & Leadership") |
-| Row 2 | **Column headers** — org-level fields + question IDs |
-| Row 3+ | **Data** — one row per organisation |
-
-**Left side (12 columns):** Organisation-level info
-- Organisation Name, Parent Company, Organisation Type, Organisation Size, Stakeholder Category, PDCS Sector, District, Part of Group
-- Role Level, Department, Age Band, Job Title (aggregated with ` | `)
-
-**Right side (37 columns):** One column per question, grouped by 8 sections
-- Each cell shows all unique answers from that org's participants, joined with ` | `
-- **BM answers are merged into EN columns** — e.g. answers from "Latar Belakang" appear in the "Background" column alongside English answers
-
-### Sheet 2: `Scorecard` — AI Readiness Index (0–100)
-
-This is the sheet to use for **evaluating whole-company AI readiness**.
-
-| Column | Description |
-|---|---|
-| Organisation Name ... Job Title | Same org-level info as Pivot |
-| Strategy & Leadership | Section index (0–100) |
-| Talent & Organisational Culture | Section index (0–100) |
-| Data Management & Readiness | Section index (0–100) |
-| Infrastructure & Technology | Section index (0–100) |
-| Governance, Policy & Ethics | Section index (0–100) |
-| Investment | Section index (0–100) |
-| AI Implementation & Potential Impact | Section index (0–100) |
-| **AI Readiness Index** | Overall 0–100 score — **the single number to rank orgs** |
-| **Level** | Readiness category |
-
-**Readiness Levels:**
-
-| Index Range | Level | Description |
+| Metric | Description | Where |
 |---|---|---|
-| 75–100 | **Leading** | AI is embedded in strategy and operations |
-| 50–74 | **Advancing** | Active AI adoption with growing maturity |
-| 25–49 | **Developing** | Early-stage AI exploration |
-| 0–24 | **Nascent** | Minimal or no AI activity |
+| **Average score** | Raw 0–4 average across all scored questions | Org Summary col I |
+| **Overall score** | Normalised 0–1 (avg_score / 4.0) | Org Summary col J |
+| **Maturity tier** | AI Aware → Explorer → Follower → Leader → Pioneer | Org Summary col Q |
+| **Consensus** | Proportion agreeing on most common answer | Question Summary col I |
+| **Agreement** | High (≥0.8) / Moderate (≥0.6) / Low / Not measurable | Multiple sheets |
+| **Review flag** | Low consensus or high std dev — needs attention | Question Summary col R |
+| **Priority rank** | Questions sorted by lowest normalised score first | Priority Detail |
 
-**Current distribution:** 5 Leading, 25 Advancing, 69 Developing, 27 Nascent
+## Maturity Tiers
 
-#### Scoring Formula
-
-```
-Raw score (0–4) = weighted average of participant scores per question
-Index (0–100)   = (raw_score / 4.0) × 100
-Level            = based on index range above
-```
-
-```
-Step 1 — BM→EN merge:
-  BM sections are mapped to EN sections using the same question_id.
-  Scores from both languages are combined.
-
-Step 2 — Per question average:
-  q_avg = SUM(all participant scores for this question) / COUNT(participants)
-
-Step 3 — Per section (weighted):
-  Section Score = SUM(q_avg_i × weight_i) / SUM(weight_i)
-
-Step 4 — OVERALL (weighted):
-  OVERALL = SUM(score_j × weight_j) / SUM(weight_j)
-  (weighted average of ALL individual participant scores)
-```
-
-**Weightage:** Configured in `QUESTION_WEIGHTS` at the top of `super_filter.py`. Default = 1.0 for all questions. Set higher for more important questions, 0 to exclude.
-
-**Background excluded:** `background_1`–`background_4` are demographic (all score=0), excluded from Scorecard.
-
-> See **[ALGORITHM.md](ALGORITHM.md)** for full step-by-step details, data flow diagram, and edge cases.
-
-- Scores are **0–4 scale** (higher = better AI maturity)
-- Cells have **color scale**: red (low) → yellow (mid) → green (high)
-- Sort by the OVERALL column to rank organisations from best to worst
-- Empty cells = no participant from that org answered any question in that section
-
-### Sheet 3: `Question Reference` — Maps question IDs to full question text
-
-| Column | Description |
+| Overall Score | Tier |
 |---|---|
-| Section | Which section the question belongs to |
-| Question ID | Short code (e.g. `background_1`) |
-| Question # | Order within the section |
-| Question Text | Full question wording |
+| 0.0 – 0.2 | AI Aware - 0 |
+| 0.2 – 0.4 | AI Explorer - 1 |
+| 0.4 – 0.6 | AI Follower - 2 |
+| 0.6 – 0.8 | AI Leader - 3 |
+| 0.8 – 1.0 | AI Pioneer - 4 |
 
-## How to Verify & Validate the Output
+## Interactive Features
 
-### 1. Row count
-The output should have exactly **126 data rows** (one per organisation). Row 1 = section headers, Row 2 = column headers, Rows 3–128 = data.
+- **Dashboard:** Change cell B4 to any org name — all stats update via formulas
+- **Organisation Report:** Change cell B3 to any org name — full report updates
+- **All data sheets** have auto-filters and frozen headers
+- **Score columns** have red→yellow→green color scales
+- **Maturity tier & distance** are Excel formulas (recalculate on org change)
 
-### 2. Each org appears exactly once
-Scroll through column A — every organisation name should appear only once. No duplicates.
+## BM→EN Merge
 
-### 3. Multi-value fields are aggregated
-Columns like **Role Level**, **Department**, **Age Band**, **Job Title** should show all unique values joined with ` | `.
+Bahasa Malaysia sections are mapped to English equivalents:
 
-### 4. Multi-participant answers are preserved
-When multiple people from the same org answer the same question differently, all unique answers appear in that cell joined with ` | `. For example, BDC's `background_1` cell shows 5 different answers.
-
-### 5. Column exclusion works
-Open `super_filter.py`, comment out any line in the `OUTPUT_COLUMNS` list (add `#` at the start), re-run, and verify that column is gone from the output.
-
-### 6. Quick sanity check (Python one-liner)
-```bash
-source venv/bin/activate
-python3 -c "
-import openpyxl
-wb = openpyxl.load_workbook('SARI_Results_Processed.xlsx')
-ws = wb.active
-print('Data rows:', ws.max_row - 2)
-# Check no duplicate orgs
-orgs = set()
-for r in range(3, ws.max_row + 1):
-    name = ws.cell(r, 1).value
-    if name in orgs:
-        print(f'DUPLICATE: {name}')
-    orgs.add(name)
-print(f'Unique orgs: {len(orgs)}')
-print(f'Question columns: {ws.max_column - 12}')
-"
-```
-
-## How It Works
-
-```mermaid
-flowchart TD
-    A[📂 Raw Excel File<br/>6,771 rows × 24 columns] --> B[🔍 Read & Parse]
-    B --> C[🏢 Group by Organisation Name]
-    C --> D{Field Type?}
-    D -->|Single-value| E[One value per org<br/>Org Type, Size, Sector, etc.]
-    D -->|Multi-value| F[Aggregate unique values<br/>Role Level, Dept, Age Band, Job Title]
-    D -->|Per-question| G[Collect all unique answers<br/>per section + question_id]
-    E --> H[📊 Build Pivot Table]
-    F --> H
-    G --> H
-    H --> I[🎨 Style & Format<br/>Section group headers, alternating rows]
-    I --> J[💾 Output Excel<br/>126 rows × 86 columns]
-```
-
-### Column Processing Logic
-
-| Aggregator | Behaviour | Example Columns |
+| BM Section | → | EN Section |
 |---|---|---|
-| `single` | One value per org (all rows should match) | Organisation Type, Size, Sector, District |
-| `list` | All unique values joined with `\|` | Role Level, Department, Age Band, Job Title |
-| Question columns | All unique answers per (section, question_id) joined with `\|` | background_1, strategy_1, etc. |
+| Latar Belakang | → | Background |
+| Strategi & Kepimpinan | → | Strategy & Leadership |
+| Bakat & Budaya Organisasi | → | Talent & Organisational Culture |
+| Pengurusan Data & Kesiapsiagaan | → | Data Management & Readiness |
+| Infrastruktur & Teknologi | → | Infrastructure & Technology |
+| Tadbir Urus, Dasar & Etika | → | Governance, Policy & Ethics |
+| Pelaburan | → | Investment |
+| Pelaksanaan AI & Impak | → | AI Implementation & Potential Impact |
 
-### Multi-Participant Handling
-
-When multiple people from the same organisation answer the same question differently, **all unique answers are joined with ` | `** in that cell. This lets you see the full spread of responses at a glance.
-
-## Configuration
-
-Open `super_filter.py` and edit the **CONFIG** section at the top:
-
-```python
-# Change input/output file names
-INPUT_FILE = "SARI_Results_2026-08-05-01-54-15.xlsx"
-OUTPUT_FILE = "SARI_Results_Processed.xlsx"
-
-# What to display in Pivot question cells: "answer", "answer_value", or "answer_score"
-QUESTION_CELL_CONTENT = "answer"
-
-# To EXCLUDE an org-level column, comment it out with #
-OUTPUT_COLUMNS = [
-    ("Organisation Name",     "organisation_name",   "single"),
-    # ("Parent Company",      "parent_company",      "single"),  # ← excluded!
-    ("Organisation Type",     "organisation_type",   "single"),
-    ...
-]
-
-# To EXCLUDE a section from the Scorecard, comment it out
-SCORECARD_SECTIONS = [
-    "Background",
-    "Strategy & Leadership",
-    # "Investment",           # ← excluded from scorecard!
-    ...
-]
-```
-
-## Data Summary
-
-- **126** unique organisations → **126** rows in output
-- **16** sections (8 English + 8 Bahasa Malaysia)
-- **74** unique (section, question_id) combinations → **74** question columns in Pivot
-- **7** scored sections in Scorecard (Background excluded — demographic only)
-- **33** scored questions (0–4 scale), **4** demographic questions (background, score=0)
-- **6,771** raw rows processed
-- **1–17** participants per organisation
+> For full algorithm details, formulas, and data flow diagrams, see **[ALGORITHM.md](ALGORITHM.md)**.
 
 ## Requirements
 
@@ -275,21 +87,14 @@ SCORECARD_SECTIONS = [
 
 ```
 ammar_super_filter/
-├── super_filter.py                          # CLI processing script
+├── super_filter.py                          # CLI processing script (10-sheet output)
 ├── app.py                                   # Desktop GUI app (Tkinter)
-├── requirements.txt                         # Python dependencies (pinned versions)
-├── README.md                                # This file — quick start & overview
-├── ALGORITHM.md                             # Full algorithm docs, formulas, data flow
+├── requirements.txt                         # Python dependencies
+├── README.md                                # This file
+├── ALGORITHM.md                             # Full algorithm docs
 ├── Super_Filter.md                          # Original design brief
-├── .gitignore                               # Ignore venv, cache, output files
-├── venv/                                    # Virtual environment (not in git)
-├── SARI_Results_2026-08-05-01-54-15.xlsx    # Input file (raw survey export)
-└── SARI_Results_Processed.xlsx              # Output file (generated, not in git)
+├── .gitignore
+├── venv/
+├── SARI_Results_*.xlsx                       # Input files
+└── SARI_Organisation.xlsx                   # Output file
 ```
-
-## Future Roadmap
-
-- [ ] GUI application with drag-and-drop Excel upload
-- [ ] Interactive column toggling and filtering
-- [ ] Pivot table / chart generation
-- [ ] Export to PDF report
