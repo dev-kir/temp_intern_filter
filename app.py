@@ -1,14 +1,13 @@
 """
 Super Filter — Desktop GUI
 ============================
-Import a SARI survey Excel, view the Organisation Summary,
-switch organisations via dropdown, and export the full workbook.
+Import a SARI survey Excel, view the full Organisation Summary table,
+filter by organisation, and export the complete workbook.
 
 Usage:
     python app.py
 """
 
-import io
 import os
 import sys
 import tkinter as tk
@@ -19,7 +18,7 @@ from collections import Counter
 import pandas as pd
 
 # ═══════════════════════════════════════════════════════════════════════════
-# CONFIG (mirrors super_filter.py)
+# CONFIG
 # ═══════════════════════════════════════════════════════════════════════════
 
 CFG = {
@@ -42,8 +41,18 @@ CFG = {
     "multi_select_question_ids": ["background_2", "background_3", "background_4"],
 }
 
+NAVY = "#163A63"
+CARD_BG = "#F5F5F5"
+WHITE = "#FFFFFF"
+GREEN = "#4CAF50"
+ORANGE = "#F4B400"
+RED = "#DB4437"
+TEXT = "#1F1F1F"
+GREY = "#6E6E6E"
+HEADER_BG = "#2F5496"
+
 # ═══════════════════════════════════════════════════════════════════════════
-# DATA PROCESSING (same logic as super_filter.py)
+# DATA PROCESSING
 # ═══════════════════════════════════════════════════════════════════════════
 
 def tier(x, b):
@@ -168,22 +177,11 @@ def calculate(df, cfg):
 # GUI APP
 # ═══════════════════════════════════════════════════════════════════════════
 
-NAVY = "#163A63"
-CARD_BG = "#F5F5F5"
-WHITE = "#FFFFFF"
-GREEN = "#4CAF50"
-ORANGE = "#F4B400"
-RED = "#DB4437"
-TEXT = "#1F1F1F"
-GREY = "#6E6E6E"
-HEADER_BG = "#2F5496"
-
-
 class SuperFilterApp:
     def __init__(self, root):
         self.root = root
         self.root.title("Super Filter — SARI Organisation Summary")
-        self.root.geometry("1300x850")
+        self.root.geometry("1400x850")
         self.root.configure(bg=WHITE)
 
         self.df = None
@@ -191,41 +189,24 @@ class SuperFilterApp:
         self.sdf = None
         self.qdf = None
         self.orgs = []
-        self.selected_org = tk.StringVar()
         self.filepath = None
+        self.sort_col = None
+        self.sort_asc = True
 
         self._build_ui()
-        self._setup_drag_drop()
-
-    def _setup_drag_drop(self):
-        """Enable drag-and-drop of Excel files onto the window."""
-        try:
-            from tkinterdnd2 import DND_FILES
-            self.root.drop_target_register(DND_FILES)
-            self.root.dnd_bind("<<Drop>>", self._on_drop)
-        except ImportError:
-            pass
-
-    def _on_drop(self, event):
-        path = event.data.strip("{}")
-        if path.endswith(".xlsx"):
-            self._process_file(path)
 
     def _build_ui(self):
-        # ── Top bar ──
         top = tk.Frame(self.root, bg=NAVY, height=50)
         top.pack(fill=tk.X)
         top.pack_propagate(False)
 
-        title_lbl = tk.Label(top, text="SARI Organisation Summary", font=("Calibri", 16, "bold"),
-                             fg=WHITE, bg=NAVY)
-        title_lbl.pack(side=tk.LEFT, padx=20, pady=10)
+        tk.Label(top, text="SARI Organisation Summary", font=("Calibri", 16, "bold"),
+                 fg=WHITE, bg=NAVY).pack(side=tk.LEFT, padx=20, pady=10)
 
-        self.status_lbl = tk.Label(top, text="Open an Excel file or drag & drop it here",
+        self.status_lbl = tk.Label(top, text="Open an Excel file to begin",
                                    font=("Calibri", 10), fg="#AABBCC", bg=NAVY)
         self.status_lbl.pack(side=tk.RIGHT, padx=20, pady=10)
 
-        # ── Toolbar ──
         toolbar = tk.Frame(self.root, bg="#F0F0F0", height=40)
         toolbar.pack(fill=tk.X)
         toolbar.pack_propagate(False)
@@ -234,26 +215,25 @@ class SuperFilterApp:
                   font=("Calibri", 10), bg=WHITE, relief=tk.FLAT, padx=15, pady=4,
                   cursor="hand2").pack(side=tk.LEFT, padx=10, pady=5)
 
-        tk.Label(toolbar, text="Organisation:", font=("Calibri", 10, "bold"),
+        tk.Label(toolbar, text="Filter:", font=("Calibri", 10, "bold"),
                  bg="#F0F0F0", fg=TEXT).pack(side=tk.LEFT, padx=(20, 5), pady=5)
 
-        self.org_dropdown = ttk.Combobox(toolbar, textvariable=self.selected_org,
-                                         state="readonly", font=("Calibri", 10), width=50)
-        self.org_dropdown.pack(side=tk.LEFT, padx=5, pady=5)
-        self.org_dropdown.bind("<<ComboboxSelected>>", self._on_org_change)
+        self.search_var = tk.StringVar()
+        self.search_var.trace_add("write", lambda *a: self._refresh_table())
+        search_entry = tk.Entry(toolbar, textvariable=self.search_var, font=("Calibri", 10), width=30)
+        search_entry.pack(side=tk.LEFT, padx=5, pady=5)
 
         tk.Button(toolbar, text="Export Full Report", command=self._export,
                   font=("Calibri", 10, "bold"), bg=HEADER_BG, fg=WHITE,
                   relief=tk.FLAT, padx=15, pady=4, cursor="hand2").pack(side=tk.RIGHT, padx=10, pady=5)
 
-        # ── Main content area ──
+        # ── Main table area ──
         self.main_frame = tk.Frame(self.root, bg=WHITE)
-        self.main_frame.pack(fill=tk.BOTH, expand=True, padx=20, pady=10)
+        self.main_frame.pack(fill=tk.BOTH, expand=True, padx=10, pady=5)
 
         self.placeholder = tk.Label(self.main_frame,
-                                    text="Open a SARI survey Excel file to view the organisation summary.\n\n"
-                                         "You can also drag & drop an .xlsx file onto this window.",
-                                    font=("Calibri", 12), fg=GREY, bg=WHITE, justify=tk.CENTER)
+                                    text="Open a SARI survey Excel file to view the organisation summary.",
+                                    font=("Calibri", 12), fg=GREY, bg=WHITE)
         self.placeholder.pack(expand=True)
 
     def _open_file(self):
@@ -273,156 +253,113 @@ class SuperFilterApp:
             self.df = load_data(path, CFG)
             self.odf, self.sdf, self.qdf = calculate(self.df, CFG)
             self.orgs = sorted(self.odf["Organisation name"].tolist())
-            self.org_dropdown["values"] = self.orgs
-            if self.orgs:
-                self.selected_org.set(self.orgs[0])
             self.status_lbl.config(
                 text=f"{Path(path).name} — {len(self.orgs)} orgs, {self.df['Respondent ID'].nunique()} respondents")
-            self._render_summary()
+            self._build_table()
         except Exception as e:
             messagebox.showerror("Error", str(e))
             self.status_lbl.config(text="Error loading file")
 
-    def _on_org_change(self, event=None):
-        self._render_summary()
-
-    def _score_color(self, val):
-        if val is None or pd.isna(val):
-            return TEXT
-        if val >= 0.75: return GREEN
-        if val >= 0.50: return ORANGE
-        return RED
-
-    def _render_summary(self):
+    def _build_table(self):
         for w in self.main_frame.winfo_children():
             w.destroy()
 
-        org = self.selected_org.get()
-        if not org or self.odf is None:
-            return
+        # ── Treeview with scrollbars ──
+        tree_frame = tk.Frame(self.main_frame, bg=WHITE)
+        tree_frame.pack(fill=tk.BOTH, expand=True)
 
-        row_data = self.odf[self.odf["Organisation name"] == org]
-        if row_data.empty:
-            return
-        d = row_data.iloc[0]
-
-        # ── KPI Cards Row 1 ──
-        cards_frame = tk.Frame(self.main_frame, bg=WHITE)
-        cards_frame.pack(fill=tk.X, pady=(0, 10))
-
-        overall_val = d["Overall score"]
-        kpis = [
-            ("Overall Score", f"{overall_val:.1%}" if pd.notna(overall_val) else "-"),
-            ("Maturity Tier", str(d["Maturity tier"])),
-            ("Respondents", str(int(d["Respondents"]))),
-            ("Organisation Type", str(d["Organisation type"])),
-            ("Organisation Size", str(d["Organisation size"])),
-            ("Sector", str(d["Sector"])),
+        columns = [
+            "Organisation name", "Organisation type", "Respondents",
+            "Departments", "Role levels", "Org size", "Sector",
+            "Latest submission", "Avg score", "Overall score",
+            "Strongest section", "Weakest section", "Consensus",
+            "Review qs", "Agreement", "Interpretation", "Maturity tier", "Distance"
+        ]
+        display_cols = [
+            "Organisation name", "Organisation type", "Resp",
+            "Depts", "Roles", "Size", "Sector",
+            "Latest", "Avg", "Overall",
+            "Strongest", "Weakest", "Consensus",
+            "Review", "Agreement", "Interpretation", "Tier", "Dist"
         ]
 
-        for label, value in kpis:
-            card = tk.Frame(cards_frame, bg=CARD_BG, padx=12, pady=8, relief=tk.FLAT, bd=0)
-            card.pack(side=tk.LEFT, padx=5, fill=tk.BOTH, expand=True)
+        self.tree = ttk.Treeview(tree_frame, columns=display_cols, show="headings", height=25)
 
-            tk.Label(card, text=label, font=("Calibri", 9, "bold"), fg=TEXT, bg=CARD_BG,
-                     anchor=tk.W).pack(fill=tk.X)
-            val_color = TEXT
-            if label == "Overall Score":
-                val_color = self._score_color(overall_val)
-            tk.Label(card, text=value, font=("Calibri", 14, "bold"), fg=val_color, bg=CARD_BG,
-                     anchor=tk.W).pack(fill=tk.X)
+        vsb = ttk.Scrollbar(tree_frame, orient=tk.VERTICAL, command=self.tree.yview)
+        hsb = ttk.Scrollbar(tree_frame, orient=tk.HORIZONTAL, command=self.tree.xview)
+        self.tree.configure(yscrollcommand=vsb.set, xscrollcommand=hsb.set)
 
-        # ── KPI Cards Row 2 ──
-        cards_frame2 = tk.Frame(self.main_frame, bg=WHITE)
-        cards_frame2.pack(fill=tk.X, pady=(0, 10))
+        self.tree.grid(row=0, column=0, sticky="nsew")
+        vsb.grid(row=0, column=1, sticky="ns")
+        hsb.grid(row=1, column=0, sticky="ew")
+        tree_frame.grid_rowconfigure(0, weight=1)
+        tree_frame.grid_columnconfigure(0, weight=1)
 
-        kpis2 = [
-            ("Strongest Section", str(d["Strongest section"])),
-            ("Weakest Section", str(d["Weakest section"])),
-            ("Agreement", str(d["Agreement"])),
-            ("Interpretation", str(d["Interpretation"])),
-            ("Questions for Review", str(int(d["Questions for review"]))),
-            ("Distance to Next Tier", f"{d['Distance to next tier']:.1%}" if pd.notna(d["Distance to next tier"]) else "-"),
-        ]
+        widths = [300, 200, 50, 50, 50, 60, 150, 120, 60, 70, 180, 180, 70, 50, 80, 180, 120, 60]
+        for i, (col, display, w) in enumerate(zip(columns, display_cols, widths)):
+            self.tree.heading(display, text=display, command=lambda c=col: self._sort_by(c))
+            self.tree.column(display, width=w, minwidth=40)
 
-        for label, value in kpis2:
-            card = tk.Frame(cards_frame2, bg=CARD_BG, padx=12, pady=8, relief=tk.FLAT, bd=0)
-            card.pack(side=tk.LEFT, padx=5, fill=tk.BOTH, expand=True)
+        self._refresh_table()
 
-            tk.Label(card, text=label, font=("Calibri", 9, "bold"), fg=TEXT, bg=CARD_BG,
-                     anchor=tk.W).pack(fill=tk.X)
-            tk.Label(card, text=value, font=("Calibri", 14, "bold"), fg=TEXT, bg=CARD_BG,
-                     anchor=tk.W).pack(fill=tk.X)
+    def _refresh_table(self):
+        if self.odf is None:
+            return
+        self.tree.delete(*self.tree.get_children())
 
-        # ── Section Scores Table ──
-        sec_frame = tk.Frame(self.main_frame, bg=WHITE)
-        sec_frame.pack(fill=tk.BOTH, expand=True, pady=(10, 0))
+        search = self.search_var.get().lower()
+        for _, row in self.odf.iterrows():
+            if search and search not in str(row["Organisation name"]).lower():
+                continue
 
-        tk.Label(sec_frame, text="Section Scores", font=("Calibri", 12, "bold"),
-                 fg=TEXT, bg=WHITE).pack(anchor=tk.W, pady=(0, 5))
+            overall = row["Overall score"]
+            overall_str = f"{overall:.1%}" if pd.notna(overall) else "-"
+            avg_str = f"{row['Average score']:.2f}" if pd.notna(row["Average score"]) else "-"
+            dist_str = f"{row['Distance to next tier']:.1%}" if pd.notna(row["Distance to next tier"]) else "-"
 
-        tbl_header = tk.Frame(sec_frame, bg=HEADER_BG)
-        tbl_header.pack(fill=tk.X)
-        for h, w in [("Section", 35), ("Score", 12), ("Agreement", 12)]:
-            tk.Label(tbl_header, text=h, font=("Calibri", 9, "bold"), fg=WHITE, bg=HEADER_BG,
-                     width=w, anchor=tk.W, padx=8, pady=4).pack(side=tk.LEFT)
+            values = (
+                row["Organisation name"],
+                row["Organisation type"],
+                int(row["Respondents"]),
+                int(row["Departments represented"]),
+                int(row["Role levels represented"]),
+                row["Organisation size"],
+                row["Sector"],
+                row["Latest submission"],
+                avg_str,
+                overall_str,
+                row["Strongest section"],
+                row["Weakest section"],
+                f"{row['Average consensus']:.2f}" if pd.notna(row["Average consensus"]) else "-",
+                int(row["Questions for review"]),
+                row["Agreement"],
+                row["Interpretation"],
+                row["Maturity tier"],
+                dist_str,
+            )
 
-        sec_data = self.sdf[self.sdf["Organisation name"] == org]
-        for i, (_, sr) in enumerate(sec_data.iterrows()):
-            bg_color = WHITE if i % 2 == 0 else "#F8F9FA"
-            row_frame = tk.Frame(sec_frame, bg=bg_color)
-            row_frame.pack(fill=tk.X)
+            # Color tag based on overall score
+            tag = "normal"
+            if pd.notna(overall):
+                if overall >= 0.75: tag = "high"
+                elif overall >= 0.50: tag = "mid"
+                elif overall > 0: tag = "low"
 
-            score_val = sr["Normalised score"]
-            score_text = f"{score_val:.1%}" if pd.notna(score_val) else "-"
-            score_color = self._score_color(score_val)
+            self.tree.insert("", tk.END, values=values, tags=(tag,))
 
-            tk.Label(row_frame, text=sr["Section"], font=("Calibri", 9), fg=TEXT, bg=bg_color,
-                     width=35, anchor=tk.W, padx=8, pady=3).pack(side=tk.LEFT)
-            tk.Label(row_frame, text=score_text, font=("Calibri", 9, "bold"), fg=score_color,
-                     bg=bg_color, width=12, anchor=tk.W, padx=8, pady=3).pack(side=tk.LEFT)
-            tk.Label(row_frame, text=sr["Agreement"], font=("Calibri", 9), fg=TEXT, bg=bg_color,
-                     width=12, anchor=tk.W, padx=8, pady=3).pack(side=tk.LEFT)
+        self.tree.tag_configure("high", foreground=GREEN)
+        self.tree.tag_configure("mid", foreground=ORANGE)
+        self.tree.tag_configure("low", foreground=RED)
 
-        # ── Priority Questions ──
-        pq_frame = tk.Frame(self.main_frame, bg=WHITE)
-        pq_frame.pack(fill=tk.BOTH, expand=True, pady=(15, 0))
+    def _sort_by(self, col):
+        if self.sort_col == col:
+            self.sort_asc = not self.sort_asc
+        else:
+            self.sort_col = col
+            self.sort_asc = False
 
-        tk.Label(pq_frame, text="Priority Questions for Review", font=("Calibri", 12, "bold"),
-                 fg=TEXT, bg=WHITE).pack(anchor=tk.W, pady=(0, 5))
-
-        pq_data = self.qdf[(self.qdf["Organisation name"] == org) & (self.qdf["Scored question"] == True)]
-        pq_data = pq_data.copy()
-        pq_data["_review"] = (pq_data["Review flag"] == "Review").astype(int)
-        pq_data = pq_data.sort_values(["_review", "Normalised score", "Question ID"],
-                                      ascending=[False, True, True]).head(5)
-
-        pq_header = tk.Frame(pq_frame, bg=HEADER_BG)
-        pq_header.pack(fill=tk.X)
-        for h, w in [("Question ID", 18), ("Question", 55), ("Most Common Answer", 40),
-                      ("Score", 8), ("Agreement", 10)]:
-            tk.Label(pq_header, text=h, font=("Calibri", 9, "bold"), fg=WHITE, bg=HEADER_BG,
-                     width=w, anchor=tk.W, padx=8, pady=4).pack(side=tk.LEFT)
-
-        for i, (_, pr) in enumerate(pq_data.iterrows()):
-            bg_color = WHITE if i % 2 == 0 else "#F8F9FA"
-            row_frame = tk.Frame(pq_frame, bg=bg_color)
-            row_frame.pack(fill=tk.X)
-
-            score_val = pr["Normalised score"]
-            score_text = f"{score_val:.1%}" if pd.notna(score_val) else "-"
-            score_color = self._score_color(score_val)
-
-            tk.Label(row_frame, text=pr["Question ID"], font=("Calibri", 9), fg=TEXT, bg=bg_color,
-                     width=18, anchor=tk.W, padx=8, pady=3).pack(side=tk.LEFT)
-            tk.Label(row_frame, text=str(pr["Question"])[:70], font=("Calibri", 9), fg=TEXT,
-                     bg=bg_color, width=55, anchor=tk.W, padx=8, pady=3).pack(side=tk.LEFT)
-            tk.Label(row_frame, text=str(pr["Most common answer"])[:50], font=("Calibri", 9),
-                     fg=TEXT, bg=bg_color, width=40, anchor=tk.W, padx=8, pady=3).pack(side=tk.LEFT)
-            tk.Label(row_frame, text=score_text, font=("Calibri", 9, "bold"), fg=score_color,
-                     bg=bg_color, width=8, anchor=tk.W, padx=8, pady=3).pack(side=tk.LEFT)
-            tk.Label(row_frame, text=pr["Agreement"], font=("Calibri", 9), fg=TEXT, bg=bg_color,
-                     width=10, anchor=tk.W, padx=8, pady=3).pack(side=tk.LEFT)
+        self.odf = self.odf.sort_values(col, ascending=self.sort_asc)
+        self._refresh_table()
 
     def _export(self):
         if self.df is None:
@@ -441,8 +378,7 @@ class SuperFilterApp:
             self.root.update()
 
             import super_filter as sf
-            odf, sdf, qdf, ddf = sf.calculate(self.df, sf.CFG)
-            sf.build(self.df, odf, sdf, qdf, ddf, sf.CFG, path)
+            sf.build(self.filepath, sf.TEMPLATE_FILE, path)
 
             messagebox.showinfo("Success", f"Saved to:\n{path}")
             self.status_lbl.config(text=f"Exported: {Path(path).name}")
@@ -453,11 +389,23 @@ class SuperFilterApp:
 
 def main():
     root = tk.Tk()
+
+    # Set icon if available
+    icon_path = Path(__file__).with_name("icon.png")
+    if icon_path.exists():
+        try:
+            img = tk.PhotoImage(file=str(icon_path))
+            root.iconphoto(True, img)
+        except Exception:
+            pass
+
     try:
         root.lift()
         root.attributes("-topmost", True)
         root.after(100, lambda: root.attributes("-topmost", False))
-    except: pass
+    except Exception:
+        pass
+
     SuperFilterApp(root)
     root.mainloop()
 
