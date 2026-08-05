@@ -1,5 +1,22 @@
+# Environments and build output
 venv/
 __pycache__/
 *.pyc
-SARI_Results_Processed.xlsx
+build/
+dist/
+*.spec.bak
+
+# Survey data and generated workbooks — these carry respondent names and job
+# titles. This repository is public. Nothing derived from real responses goes in.
+SARI_*.xlsx
+*_Results_*.xlsx
+*_Processed.xlsx
+test.xlsx
+*.zip
+
+# Scratch copies of earlier generators
+OLD/
+sari_generator/
+sari_complete_fixed_generator/
+
 .DS_Store
