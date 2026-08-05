@@ -110,7 +110,7 @@ SECTION_ORDER = [
 # ── Scorecard: which sections to include (English only by default) ──
 # Comment out sections you don't want in the scorecard.
 SCORECARD_SECTIONS = [
-    "Background",
+    # "Background",                        # NOT SCORED — demographic questions only
     "Strategy & Leadership",
     "Talent & Organisational Culture",
     "Data Management & Readiness",

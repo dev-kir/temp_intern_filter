@@ -66,10 +66,30 @@ This is the sheet to use for **evaluating whole-company performance**.
 | Column | Description |
 |---|---|
 | Organisation Name ... Job Title | Same org-level info as Pivot |
-| Background | Average score for Background section (0–4) |
 | Strategy & Leadership | Average score for Strategy section (0–4) |
-| ... 6 more sections ... | One column per section |
-| **OVERALL** | Average across all 8 sections — **the single number to rank orgs** |
+| Talent & Organisational Culture | Average score for Talent section (0–4) |
+| Data Management & Readiness | Average score for Data section (0–4) |
+| Infrastructure & Technology | Average score for Infrastructure section (0–4) |
+| Governance, Policy & Ethics | Average score for Governance section (0–4) |
+| Investment | Average score for Investment section (0–4) |
+| AI Implementation & Potential Impact | Average score for AI Impact section (0–4) |
+| **OVERALL** | Average across all 7 scored sections — **the single number to rank orgs** |
+
+#### Scoring Formula
+
+```
+For each question:
+  - Each participant's answer has a score (0–4, where 4 = best)
+  - If multiple participants answered the same question, their scores are averaged
+
+For each section:
+  Section Score = SUM(question_averages) / COUNT(questions_in_section)
+
+For the OVERALL:
+  OVERALL = SUM(all_participant_scores) / COUNT(all_participant_scores)
+```
+
+**Note:** `background_1` through `background_4` are **demographic questions** (not performance-scored). All their scores are 0 in the raw data, so they are excluded from the Scorecard. Only 7 sections with real 0–4 scoring are included.
 
 - Scores are **0–4 scale** (higher = better AI maturity)
 - Cells have **color scale**: red (low) → yellow (mid) → green (high)
@@ -184,7 +204,9 @@ SCORECARD_SECTIONS = [
 
 - **126** unique organisations → **126** rows in output
 - **16** sections (8 English + 8 Bahasa Malaysia)
-- **74** unique (section, question_id) combinations → **74** question columns
+- **74** unique (section, question_id) combinations → **74** question columns in Pivot
+- **7** scored sections in Scorecard (Background excluded — demographic only)
+- **33** scored questions (0–4 scale), **4** demographic questions (background, score=0)
 - **6,771** raw rows processed
 - **1–17** participants per organisation
 
