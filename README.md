@@ -65,20 +65,27 @@ pip install -r requirements.txt
 python super_filter.py
 ```
 
-### GUI version (browser-based)
+### GUI version (desktop app)
 
 ```bash
 source venv/bin/activate
-streamlit run app.py
+python app.py
 ```
 
-Opens in your browser at `http://localhost:8501`. Features:
-- Upload Excel file via drag-and-drop
-- Toggle org columns and scorecard sections on/off
-- Set custom question weightage (0–10)
-- View Pivot, Scorecard, and Question Reference in tabs
-- Filter by organisation name
-- Export to Excel with current settings
+Opens a native desktop window. Features:
+- **Open Excel** via file picker
+- **Toggle org columns** on/off (checkboxes in sidebar)
+- **Toggle scorecard sections** on/off
+- **Custom question weightage** (0–10 per question)
+- **Search/filter** by organisation name
+- **3 tabs**: Pivot Table, Scorecard, Question Reference
+- **Export to Excel** with current settings
+
+> **macOS note:** If you get `ModuleNotFoundError: No module named '_tkinter'`, run:
+> ```bash
+> brew install python-tk@3.14
+> ```
+> **Windows:** Tkinter is included with the Python installer — no extra steps needed.
 
 The output file `SARI_Results_Processed.xlsx` will appear in the same folder.
 
