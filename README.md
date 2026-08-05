@@ -89,23 +89,41 @@ The output Excel has **three sheets**:
 - Each cell shows all unique answers from that org's participants, joined with ` | `
 - **BM answers are merged into EN columns** — e.g. answers from "Latar Belakang" appear in the "Background" column alongside English answers
 
-### Sheet 2: `Scorecard` — Numerical scores (measure performance)
+### Sheet 2: `Scorecard` — AI Readiness Index (0–100)
 
-This is the sheet to use for **evaluating whole-company performance**.
+This is the sheet to use for **evaluating whole-company AI readiness**.
 
 | Column | Description |
 |---|---|
 | Organisation Name ... Job Title | Same org-level info as Pivot |
-| Strategy & Leadership | Average score for Strategy section (0–4) |
-| Talent & Organisational Culture | Average score for Talent section (0–4) |
-| Data Management & Readiness | Average score for Data section (0–4) |
-| Infrastructure & Technology | Average score for Infrastructure section (0–4) |
-| Governance, Policy & Ethics | Average score for Governance section (0–4) |
-| Investment | Average score for Investment section (0–4) |
-| AI Implementation & Potential Impact | Average score for AI Impact section (0–4) |
-| **OVERALL** | Average across all 7 scored sections — **the single number to rank orgs** |
+| Strategy & Leadership | Section index (0–100) |
+| Talent & Organisational Culture | Section index (0–100) |
+| Data Management & Readiness | Section index (0–100) |
+| Infrastructure & Technology | Section index (0–100) |
+| Governance, Policy & Ethics | Section index (0–100) |
+| Investment | Section index (0–100) |
+| AI Implementation & Potential Impact | Section index (0–100) |
+| **AI Readiness Index** | Overall 0–100 score — **the single number to rank orgs** |
+| **Level** | Readiness category |
 
-#### Scoring Formula (with weightage)
+**Readiness Levels:**
+
+| Index Range | Level | Description |
+|---|---|---|
+| 75–100 | **Leading** | AI is embedded in strategy and operations |
+| 50–74 | **Advancing** | Active AI adoption with growing maturity |
+| 25–49 | **Developing** | Early-stage AI exploration |
+| 0–24 | **Nascent** | Minimal or no AI activity |
+
+**Current distribution:** 5 Leading, 25 Advancing, 69 Developing, 27 Nascent
+
+#### Scoring Formula
+
+```
+Raw score (0–4) = weighted average of participant scores per question
+Index (0–100)   = (raw_score / 4.0) × 100
+Level            = based on index range above
+```
 
 ```
 Step 1 — BM→EN merge:

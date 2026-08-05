@@ -303,7 +303,7 @@ Saves the workbook to `SARI_Results_Processed.xlsx` with 3 sheets.
 
 ## 3. Complete Formula Reference
 
-### 3.1 Question Average
+### 3.1 Question Average (raw 0–4)
 
 ```
 q_avg(org, section, qid) = SUM(scores) / COUNT(scores)
@@ -311,25 +311,55 @@ q_avg(org, section, qid) = SUM(scores) / COUNT(scores)
 
 Where `scores` = all individual participant scores for that org + section + question_id.
 
-### 3.2 Section Score
+### 3.2 Section Score (raw 0–4, weighted)
 
 ```
-section_score(org, section) = SUM(q_avg_i × w_i) / SUM(w_i)
+section_raw(org, section) = SUM(q_avg_i × w_i) / SUM(w_i)
 ```
 
 Where:
 - `i` iterates over all questions in the section
 - `w_i` = `QUESTION_WEIGHTS[qid]` (default 1.0)
 
-### 3.3 OVERALL Score
+### 3.3 Section Index (0–100)
 
 ```
-overall(org) = SUM(score_j × w_j) / SUM(w_j)
+section_index = (section_raw / 4.0) × 100
+```
+
+### 3.4 OVERALL Raw Score (0–4, weighted)
+
+```
+overall_raw(org) = SUM(score_j × w_j) / SUM(w_j)
 ```
 
 Where:
 - `j` iterates over ALL individual participant scores across all 7 scored sections
 - `w_j` = weight of the question that score belongs to
+
+### 3.5 AI Readiness Index (0–100)
+
+```
+AI Readiness Index = (overall_raw / 4.0) × 100
+```
+
+### 3.6 Readiness Level
+
+```
+Level = {
+    Leading     if index ≥ 75
+    Advancing   if index ≥ 50
+    Developing  if index ≥ 25
+    Nascent     if index < 25
+}
+```
+
+| Index Range | Level | Description |
+|---|---|---|
+| 75–100 | **Leading** | AI is embedded in strategy and operations |
+| 50–74 | **Advancing** | Active AI adoption with growing maturity |
+| 25–49 | **Developing** | Early-stage AI exploration |
+| 0–24 | **Nascent** | Minimal or no AI activity |
 
 ### 3.4 Weightage Config
 

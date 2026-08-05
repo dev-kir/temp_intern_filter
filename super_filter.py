@@ -125,6 +125,18 @@ SCORECARD_SECTIONS = [
     "AI Implementation & Potential Impact",
 ]
 
+# ── Score scale conversion ──
+# Raw scores are 0–4. Convert to 0–100 index.
+RAW_SCORE_MAX = 4.0
+INDEX_SCALE = 100.0
+
+# ── Readiness level labels ──
+def readiness_level(pct: float) -> str:
+    if pct >= 75: return "Leading"
+    if pct >= 50: return "Advancing"
+    if pct >= 25: return "Developing"
+    return "Nascent"
+
 # ── Question weightage (default = 1.0 for all) ──
 # Higher weight = more important. Set to 0 to exclude a question entirely.
 # Comment out or set to 1.0 to use equal weighting.
@@ -444,12 +456,16 @@ def compute_section_scores(orgs: dict, questions: list[tuple]) -> dict:
     Uses QUESTION_WEIGHTS from config.
 
     Formula:
-      Section Score = SUM(q_avg × weight) / SUM(weights)  for all questions in section
-      OVERALL       = SUM(score × weight) / SUM(weights)  for all individual scores
+      Raw Section Score = SUM(q_avg × weight) / SUM(weights)   (0–4 scale)
+      Index              = (raw_score / 4.0) × 100              (0–100 scale)
+      OVERALL            = weighted avg of ALL individual scores
 
     Returns: dict[org_name] -> {
-        "section_scores": {section_name: average_score},
-        "overall_score": float,
+        "section_scores": {section_name: raw_score (0–4)},
+        "section_index":  {section_name: index (0–100)},
+        "overall_score":   float (0–4),
+        "overall_index":   float (0–100),
+        "readiness_level": str,
     }
     """
     section_qids = defaultdict(list)
@@ -460,6 +476,7 @@ def compute_section_scores(orgs: dict, questions: list[tuple]) -> dict:
     result = {}
     for org_name, o in orgs.items():
         section_scores = {}
+        section_index = {}
         all_weighted = 0.0
         total_weight = 0.0
 
@@ -473,17 +490,23 @@ def compute_section_scores(orgs: dict, questions: list[tuple]) -> dict:
                     w = QUESTION_WEIGHTS.get(qid, 1.0)
                     sec_weighted += q_avg * w
                     sec_weight_sum += w
-                    # For overall: weight each individual score
                     for s, _ in score_list:
                         all_weighted += s * w
                         total_weight += w
 
-            section_scores[sec] = round(sec_weighted / sec_weight_sum, 2) if sec_weight_sum > 0 else None
+            raw = round(sec_weighted / sec_weight_sum, 2) if sec_weight_sum > 0 else None
+            section_scores[sec] = raw
+            section_index[sec] = round((raw / RAW_SCORE_MAX) * INDEX_SCALE, 1) if raw is not None else None
 
-        overall = round(all_weighted / total_weight, 2) if total_weight > 0 else None
+        overall_raw = round(all_weighted / total_weight, 2) if total_weight > 0 else None
+        overall_idx = round((overall_raw / RAW_SCORE_MAX) * INDEX_SCALE, 1) if overall_raw is not None else None
+
         result[org_name] = {
             "section_scores": section_scores,
-            "overall_score": overall,
+            "section_index": section_index,
+            "overall_score": overall_raw,
+            "overall_index": overall_idx,
+            "readiness_level": readiness_level(overall_idx) if overall_idx is not None else "N/A",
         }
 
     return result
@@ -497,7 +520,7 @@ def write_scorecard_sheet(wb, orgs: dict, questions: list[tuple]):
     # ── Headers ──
     org_headers = [col[0] for col in OUTPUT_COLUMNS]
     section_headers = SCORECARD_SECTIONS
-    all_headers = org_headers + section_headers + ["OVERALL"]
+    all_headers = org_headers + section_headers + ["AI Readiness Index", "Level"]
 
     for col_idx, header in enumerate(all_headers, 1):
         ws.cell(row=1, column=col_idx, value=header)
@@ -525,22 +548,28 @@ def write_scorecard_sheet(wb, orgs: dict, questions: list[tuple]):
                 val = ""
             ws.cell(row=row_num, column=col_idx, value=val)
 
-        # Section scores
+        # Section scores (0–100 index)
         base_col = len(OUTPUT_COLUMNS)
         for i, sec in enumerate(SCORECARD_SECTIONS):
-            score = sd.get("section_scores", {}).get(sec)
+            idx = sd.get("section_index", {}).get(sec)
             cell = ws.cell(row=row_num, column=base_col + i + 1)
-            if score is not None:
-                cell.value = score
-                cell.number_format = '0.00'
+            if idx is not None:
+                cell.value = idx
+                cell.number_format = '0.0'
 
-        # Overall score
-        overall_cell = ws.cell(row=row_num, column=base_col + len(SCORECARD_SECTIONS) + 1)
-        overall = sd.get("overall_score")
-        if overall is not None:
-            overall_cell.value = overall
-            overall_cell.number_format = '0.00'
-            overall_cell.font = Font(name="Calibri", bold=True, size=10)
+        # AI Readiness Index (0–100)
+        idx_col = base_col + len(SCORECARD_SECTIONS) + 1
+        idx_cell = ws.cell(row=row_num, column=idx_col)
+        overall_idx = sd.get("overall_index")
+        if overall_idx is not None:
+            idx_cell.value = overall_idx
+            idx_cell.number_format = '0.0'
+            idx_cell.font = Font(name="Calibri", bold=True, size=10)
+
+        # Readiness Level
+        lvl_cell = ws.cell(row=row_num, column=idx_col + 1)
+        lvl_cell.value = sd.get("readiness_level", "N/A")
+        lvl_cell.font = Font(name="Calibri", bold=True, size=10)
 
         row_num += 1
 
