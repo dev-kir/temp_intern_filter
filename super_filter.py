@@ -16,7 +16,9 @@ from pathlib import Path
 from collections import Counter
 
 import pandas as pd
-from openpyxl import Workbook
+import shutil
+from copy import copy
+from openpyxl import Workbook, load_workbook
 from openpyxl.styles import Font, PatternFill, Alignment, Border, Side, NamedStyle
 from openpyxl.chart import BarChart, Reference
 from openpyxl.chart.series import DataPoint
@@ -31,6 +33,8 @@ from openpyxl.workbook.defined_name import DefinedName
 
 INPUT_FILE = "SARI_Results_2026-08-04-00-36-28.xlsx"
 OUTPUT_FILE = "SARI_Organisation.xlsx"
+# The report design lives in this template, not in code. See build().
+TEMPLATE_FILE = "report_template.xlsx"
 
 CFG = {
     "high_consensus": 0.80,
@@ -471,374 +475,119 @@ def calculate(df, cfg):
 # WORKBOOK BUILDER
 # ═══════════════════════════════════════════════════════════════════════════
 
+def _clear_and_fill(ws, headers, rows, start_row):
+    """Replace the data region of a template sheet, keeping its styling.
+
+    Row `start_row` in the template carries the intended cell styles and number
+    formats for a data row, so it is captured first and stamped onto every row
+    written after it.
+    """
+    style_src = [(ws.cell(start_row, c)._style,
+                  ws.cell(start_row, c).number_format,
+                  copy(ws.cell(start_row, c).alignment))
+                 for c in range(1, len(headers) + 1)]
+    for r in range(start_row, max(ws.max_row, start_row) + 1):
+        for c in range(1, max(ws.max_column, len(headers)) + 1):
+            ws.cell(r, c).value = None
+    for c, h in enumerate(headers, 1):
+        ws.cell(start_row - 1, c).value = h
+    for i, row in enumerate(rows, start_row):
+        for c, v in enumerate(row, 1):
+            cell = ws.cell(i, c)
+            cell.value = v
+            st, nf, al = style_src[c - 1]
+            cell._style = copy(st)
+            cell.number_format = nf
+            cell.alignment = copy(al)
+    last = ws.cell(start_row - 1, len(headers)).column_letter
+    ws.auto_filter.ref = f"A{start_row-1}:{last}{start_row + max(len(rows), 1) - 1}"
+
+
 def build(df, odf, sdf, qdf, ddf, cfg, out):
-    wb = Workbook()
-    wb.remove(wb.active)
-    sections = cfg["section_order"]
-    L = LAYOUT
+    """Fill the presentation template with freshly calculated data.
 
-    # ── 1. Read Me ──
-    ws = wb.create_sheet("Read Me")
-    apply_banner(ws, "SARI Organisation Statistics",
-                 "Interactive organisation-level reporting workbook generated from the uploaded SARI results.", 8)
-    notes = [
-        ("Purpose", "Analyse questionnaire results by organisation, section, question and answer distribution."),
-        ("Dashboard", "Choose an organisation in cell B4. The section score table and chart update using formulas."),
-        ("Organisation Summary", "One row per organisation, including respondent count, maturity score, strongest/weakest sections and agreement."),
-        ("Section Summary", "Scored question results aggregated by organisation and standardised section."),
-        ("Question Summary", "Question-level mode, consensus, score statistics, agreement and review flags."),
-        ("Answer Distribution", "Counts and percentages for each answer option. Multi-select percentages may exceed 100% in total."),
-        ("Scoring rule", "Only rows where Max score is greater than zero are included in maturity scores. Background questions remain distribution-only."),
-        ("Agreement rule", "High: at least 80% selected the modal answer; Moderate: 60% to below 80%; Low: below 60%; not measurable for one respondent."),
-        ("Caution", "Results with one respondent represent an individual perception, not organisation-wide consensus."),
-        ("Data standardisation", "Sections are standardised using the Question ID prefix, preventing English and Malay labels from splitting the same section."),
-        ("Refresh", "This workbook is a snapshot. Re-run the analysis when new responses are added to the source export."),
-        ("Enhancements in this version", ""),
-        ("", "Maturity tiers, distance to next tier and a printable Organisation Report are included."),
-    ]
-    for r, (a, b) in enumerate(notes, 4):
-        ws.cell(r, 1, a).font = Font(name=FONT_FAMILY, bold=True, color=NAVY)
-        ws.cell(r, 2, b).font = Font(name=FONT_FAMILY, size=10, color=TEXT_DARK)
-        # No per-row merge: the reference workbook merges only the two banner rows,
-        # and column B is wide enough (100) to hold the text without it.
-    ws.column_dimensions["A"].width = 24
-    ws.column_dimensions["B"].width = 100
-    ws.page_setup.orientation = "portrait"
+    The template owns everything visual: fonts, fills, merged cells, column
+    widths, the chart, print settings, and the Dashboard / Organisation Report
+    formulas. This function replaces only the DATA rows.
 
-    # ── 2. Lists (hidden) ──
-    ws = wb.create_sheet("Lists")
-    for r, o in enumerate(odf["Organisation name"], 1):
+    Building the presentation in code never matched a workbook designed in
+    Excel, and it also produced a chart with both axes at axPos="l", which
+    Excel rejects outright. Separating calculation from presentation removes a
+    whole class of that problem.
+    """
+    tpl = Path(TEMPLATE_FILE)
+    if not tpl.exists():
+        raise SystemExit(
+            f"Template not found: {TEMPLATE_FILE}\n"
+            "It carries the report design and must sit beside this script.")
+    shutil.copy2(tpl, out)
+    wb = load_workbook(out, data_only=False)
+
+    def frame_rows(frame):
+        return frame.where(pd.notna(frame), None).values.tolist()
+
+    # ── Lists: one organisation per row, drives the dropdown ──
+    ws = wb["Lists"]
+    for r in range(1, max(ws.max_row, 1) + 1):
+        ws.cell(r, 1).value = None
+    orgs = list(odf["Organisation name"])
+    for r, o in enumerate(orgs, 1):
         ws.cell(r, 1, o)
     ws.sheet_state = "hidden"
-    ws.page_setup.orientation = "portrait"
 
-    # Dynamic named range so the dropdown grows with the organisation list rather
-    # than being pinned to today's row count.
+    # ── Data sheets: headers on row 4, data from row 5 ──
+    for name, frame in (("Organisation Summary", odf),
+                        ("Section Summary", sdf),
+                        ("Question Summary", qdf),
+                        ("Answer Distribution", ddf)):
+        _clear_and_fill(wb[name], list(frame.columns), frame_rows(frame), 5)
+
+    # ── Raw Answers ──
+    rframe = df.copy()
+    for c in RAW_OUT:
+        if c not in rframe.columns:
+            rframe[c] = None
+    rframe = rframe[RAW_OUT]
+    _clear_and_fill(wb["Raw Answers"], RAW_OUT, frame_rows(rframe), 5)
+
+    # ── Priority Detail: hidden lookup table, header on row 1 ──
+    prows = []
+    for org, g in qdf[qdf["Scored question"] == True].groupby("Organisation name"):
+        gg = g.copy()
+        gg["_review"] = (gg["Review flag"] == "Review").astype(int)
+        gg = gg.sort_values(["_review", "Normalised score", "Question ID"],
+                            ascending=[False, True, True])
+        for rank, (_, x) in enumerate(gg.iterrows(), 1):
+            prows.append([org, x["Question ID"], x["Question"], x["Most common answer"],
+                          x["Normalised score"], x["Agreement"], x["Review flag"],
+                          rank, f"{org}|{rank}"])
+    pcols = ["Organisation", "Question ID", "Question", "Most common answer",
+             "Normalised score", "Agreement", "Review flag", "Priority rank", "Lookup key"]
+    _clear_and_fill(wb["Priority Detail"], pcols, prows, 2)
+    wb["Priority Detail"].auto_filter.ref = None
+    wb["Priority Detail"].sheet_state = "hidden"
+
+    # ── Dropdown: a dynamic named range, so it grows with the data ──
+    if "OrganisationList" in wb.defined_names:
+        del wb.defined_names["OrganisationList"]
     wb.defined_names["OrganisationList"] = DefinedName(
         "OrganisationList",
         attr_text="Lists!$A$1:INDEX(Lists!$A:$A,COUNTA(Lists!$A:$A))")
 
-    # ── 3. Dashboard ──
-    # Layout matches chatgpt/SARI_Organisation_Fixed_Dropdowns.xlsx exactly:
-    # A1:J24, selector at B4, label/value pairs at A/D/G, section table A17:E24.
-    ws = wb.create_sheet("Dashboard")
-    ws.sheet_view.showGridLines = False
-    ws.merge_cells("A1:J1")
-    ws["A1"] = "Organisation Dashboard"
-    ws["A1"].font = TITLE_FONT
-    ws["A1"].fill = PatternFill("solid", fgColor=NAVY)
-    ws["A1"].alignment = Alignment(vertical="center")
-    ws.merge_cells("A2:J2")
-    ws["A2"] = ("Select an organisation. Green cells contain imported selections; "
-                "black cells are formulas.")
-    ws["A2"].font = SUBTITLE_FONT
-    ws["A2"].alignment = Alignment(wrap_text=True, vertical="center")
+    first_org = orgs[0] if orgs else ""
+    for sheet, cell_ref in (("Dashboard", "B4"), ("Organisation Report", "B3")):
+        ws = wb[sheet]
+        ws[cell_ref] = first_org
+        dv = DataValidation(type="list", formula1="=OrganisationList", allow_blank=False,
+                            showErrorMessage=True, showInputMessage=True,
+                            errorTitle="Invalid organisation",
+                            error="Select an organisation from the dropdown list.",
+                            promptTitle="Organisation selector",
+                            prompt="Choose an organisation from the list.")
+        ws.add_data_validation(dv)
+        dv.add(ws[cell_ref])
 
-    # Selector, driven by the OrganisationList defined name so it grows with the data
-    ws["A4"] = "Selected organisation"
-    ws["A4"].font = CARD_LABEL_FONT
-    first_org = odf.iloc[0]["Organisation name"] if len(odf) else ""
-    ws["B4"] = first_org
-    ws["B4"].font = Font(name=FONT_FAMILY, size=12, bold=True, color="FF008000")
-    ws["B4"].fill = PatternFill("solid", fgColor="FFE2F0D9")
-    ws["B4"].alignment = CARD_VALUE_ALIGN
-    ws["B4"].border = THIN_BORDER
-    dv = DataValidation(type="list", formula1="OrganisationList", allow_blank=True)
-    ws.add_data_validation(dv)
-    dv.add(ws["B4"])
-
-    def _kpi(label_row, col_letter, label, org_col, pct=False, merge_to=None):
-        """One label/value pair. Value reads Organisation Summary via the B4 selector."""
-        lc = ws[f"{col_letter}{label_row}"]
-        lc.value = label
-        lc.font = CARD_LABEL_FONT
-        lc.alignment = CARD_ALIGN
-        vr = label_row + 1
-        vc = ws[f"{col_letter}{vr}"]
-        vc.value = (f"=IFERROR(INDEX('Organisation Summary'!${org_col}:${org_col},"
-                    f"MATCH($B$4,'Organisation Summary'!$A:$A,0)),\"\")")
-        vc.font = CARD_VALUE_FONT
-        vc.alignment = CARD_VALUE_ALIGN
-        vc.fill = PatternFill("solid", fgColor=BLUE_LIGHT)
-        if pct:
-            vc.number_format = "0.0%"
-        if merge_to:
-            ws.merge_cells(f"{col_letter}{vr}:{merge_to}{vr}")
-            for cc in range(column_index_from_string(col_letter) + 1,
-                            column_index_from_string(merge_to) + 1):
-                ws.cell(vr, cc).fill = PatternFill("solid", fgColor=BLUE_LIGHT)
-
-    _kpi(6, "A", "Respondents",          "C", merge_to="B")
-    _kpi(6, "D", "Overall score",        "J", pct=True, merge_to="E")
-    _kpi(6, "G", "Strongest section",    "K", merge_to="H")
-    _kpi(9, "A", "Weakest section",      "L", merge_to="B")
-    _kpi(9, "D", "Agreement",            "O", merge_to="E")
-    _kpi(9, "G", "Interpretation",       "P", merge_to="H")
-    _kpi(12, "A", "Maturity tier",       "Q")
-    _kpi(12, "D", "Distance to next tier", "R", pct=True)
-    _kpi(12, "G", "Questions for review", "N")
-
-    # ── Section table, A17:E24 ──
-    tbl_row = 17
-    for i, hdr in enumerate(["Section", "Average score", "Normalised score",
-                             "Respondents", "Agreement"]):
-        c = ws.cell(tbl_row, 1 + i)
-        c.value = hdr
-        c.font = TABLE_HEADER_FONT
-        c.fill = PatternFill("solid", fgColor=NAVY)
-        c.alignment = HEADER_ALIGN
-
-    for ri, sec in enumerate(sections):
-        r = tbl_row + 1 + ri
-        bg = WHITE if ri % 2 == 0 else ROW_ALT
-        for ci in range(1, 6):
-            cell = ws.cell(r, ci)
-            cell.fill = PatternFill("solid", fgColor=bg)
-            cell.font = TABLE_BODY_FONT
-        ws.cell(r, 1).value = sec
-        ws.cell(r, 1).alignment = LEFT_ALIGN
-        ws.cell(r, 2).value = (f"=IFERROR(SUMIFS('Section Summary'!$E:$E,"
-                               f"'Section Summary'!$A:$A,$B$4,'Section Summary'!$B:$B,$A{r}),\"\")")
-        ws.cell(r, 2).alignment = CENTER_ALIGN
-        ws.cell(r, 3).value = (f"=IFERROR(SUMIFS('Section Summary'!$J:$J,"
-                               f"'Section Summary'!$A:$A,$B$4,'Section Summary'!$B:$B,$A{r}),\"\")")
-        ws.cell(r, 3).number_format = "0.0%"
-        ws.cell(r, 3).alignment = CENTER_ALIGN
-        ws.cell(r, 4).value = (f"=IFERROR(SUMIFS('Section Summary'!$C:$C,"
-                               f"'Section Summary'!$A:$A,$B$4,'Section Summary'!$B:$B,$A{r}),\"\")")
-        ws.cell(r, 4).alignment = CENTER_ALIGN
-        ws.cell(r, 5).value = (
-            f'=IF(D{r}<2,"Not measurable",'
-            f"IF(SUMIFS('Section Summary'!$K:$K,'Section Summary'!$A:$A,$B$4,"
-            f"'Section Summary'!$B:$B,$A{r})>=0.8,\"High\","
-            f"IF(SUMIFS('Section Summary'!$K:$K,'Section Summary'!$A:$A,$B$4,"
-            f"'Section Summary'!$B:$B,$A{r})>=0.6,\"Moderate\",\"Low\")))")
-        ws.cell(r, 5).alignment = CENTER_ALIGN
-
-    last_tbl_row = tbl_row + len(sections)
-    ws.conditional_formatting.add(
-        f"C{tbl_row+1}:C{last_tbl_row}",
-        ColorScaleRule(start_type="min", start_color="FFF8696B",
-                       mid_type="percentile", mid_value=50, mid_color="FFFFEB84",
-                       end_type="max", end_color="FF63BE7B"))
-
-    ch = BarChart()
-    ch.type = "bar"
-    ch.style = 2
-    ch.title = "Section maturity profile"
-    ch.legend = None
-    ch.add_data(Reference(ws, min_col=3, min_row=tbl_row + 1, max_row=last_tbl_row),
-                titles_from_data=False)
-    ch.set_categories(Reference(ws, min_col=1, min_row=tbl_row + 1, max_row=last_tbl_row))
-    ch.width = 15
-    ch.height = 7.5
-    ch.y_axis.title = "Normalised score"
-    ch.x_axis.title = "Section"
-    ch.y_axis.numFmt = "0.0%"
-    # For a HORIZONTAL bar chart the category axis sits left and the value axis
-    # sits bottom. openpyxl leaves both at "l", which is invalid OOXML: Excel
-    # refuses the file and offers to "recover" it, silently dropping the chart
-    # and some formatting on the way. LibreOffice accepts it, so this only shows
-    # up in Excel. Set both explicitly.
-    ch.x_axis.axPos = "l"
-    ch.y_axis.axPos = "b"
-    ch.x_axis.delete = False
-    ch.y_axis.delete = False
-    for idx, color in enumerate(CHART_COLORS[:len(sections)]):
-        pt = DataPoint(idx=idx)
-        pt.graphicalProperties.solidFill = color
-        ch.series[0].data_points.append(pt)
-    ws.add_chart(ch, "G17")
-
-    for col, w in {"A": 42.0, "B": 39.1, "C": 14.0, "D": 15.0, "E": 18.0, "G": 31.4}.items():
-        ws.column_dimensions[col].width = w
-    for r, h in {1: 27.75, 2: 30.0, 7: 15.0, 10: 15.0, 13: 34.5, 17: 27.75}.items():
-        ws.row_dimensions[r].height = h
-    ws.freeze_panes = "A17"
-    ws.page_setup.orientation = "portrait"
-
-    # ── 4. Organisation Report ──
-    # A1:H26, selector at B3, pairs at A/D/G, section table A10:C17, priority A20:F26.
-    ws = wb.create_sheet("Organisation Report")
-    ws.sheet_view.showGridLines = False
-    ws.merge_cells("A1:H1")
-    ws["A1"] = "SARI Organisation Report"
-    ws["A1"].font = TITLE_FONT
-    ws["A1"].fill = PatternFill("solid", fgColor=NAVY)
-    ws["A1"].alignment = Alignment(vertical="center")
-
-    ws["A3"] = "Selected organisation"
-    ws["A3"].font = CARD_LABEL_FONT
-    ws["B3"] = first_org
-    ws["B3"].font = Font(name=FONT_FAMILY, size=12, bold=True, color="FF008000")
-    ws["B3"].fill = PatternFill("solid", fgColor="FFE2F0D9")
-    ws["B3"].alignment = CARD_VALUE_ALIGN
-    ws["B3"].border = THIN_BORDER
-    dv2 = DataValidation(type="list", formula1="OrganisationList", allow_blank=True)
-    ws.add_data_validation(dv2)
-    dv2.add(ws["B3"])
-
-    def _rkpi(row, lbl_col, val_col, label, org_col, pct=False):
-        lc = ws[f"{lbl_col}{row}"]
-        lc.value = label
-        lc.font = CARD_LABEL_FONT
-        lc.alignment = CARD_ALIGN
-        vc = ws[f"{val_col}{row}"]
-        vc.value = (f"=IFERROR(INDEX('Organisation Summary'!${org_col}:${org_col},"
-                    f"MATCH($B$3,'Organisation Summary'!$A:$A,0)),\"\")")
-        vc.font = CARD_VALUE_FONT
-        vc.alignment = CARD_VALUE_ALIGN
-        vc.fill = PatternFill("solid", fgColor=BLUE_LIGHT)
-        if pct:
-            vc.number_format = "0.0%"
-
-    _rkpi(5, "A", "B", "Overall score",     "J", pct=True)
-    _rkpi(5, "D", "E", "Maturity tier",     "Q")
-    _rkpi(5, "G", "H", "Respondents",       "C")
-    _rkpi(7, "A", "B", "Strongest section", "K")
-    _rkpi(7, "D", "E", "Weakest section",   "L")
-    _rkpi(7, "G", "H", "Agreement",         "O")
-
-    st_row = 10
-    for i, hdr in enumerate(["Section", "Score", "Agreement"]):
-        c = ws.cell(st_row, 1 + i)
-        c.value = hdr
-        c.font = TABLE_HEADER_FONT
-        c.fill = PatternFill("solid", fgColor=HEADER_BG)
-        c.alignment = HEADER_ALIGN
-
-    sec_last = 4 + len(sdf)
-    for ri, sec in enumerate(sections):
-        r = st_row + 1 + ri
-        bg = WHITE if ri % 2 == 0 else ROW_ALT
-        for ci in range(1, 4):
-            ws.cell(r, ci).fill = PatternFill("solid", fgColor=bg)
-            ws.cell(r, ci).font = TABLE_BODY_FONT
-        ws.cell(r, 1).value = sec
-        ws.cell(r, 1).alignment = LEFT_ALIGN
-        ws.cell(r, 2).value = (f"=IFERROR(SUMIFS('Section Summary'!$J:$J,"
-                               f"'Section Summary'!$A:$A,$B$3,'Section Summary'!$B:$B,$A{r}),\"\")")
-        ws.cell(r, 2).number_format = "0.0%"
-        ws.cell(r, 2).alignment = CENTER_ALIGN
-        ws.cell(r, 3).value = (
-            f"=IFERROR(LOOKUP(2,1/(('Section Summary'!$A$5:$A${sec_last}=$B$3)*"
-            f"('Section Summary'!$B$5:$B${sec_last}=$A{r})),"
-            f"'Section Summary'!$L$5:$L${sec_last}),\"\")")
-        ws.cell(r, 3).alignment = CENTER_ALIGN
-
-    pq_row = 20
-    ws.cell(pq_row, 1).value = "Priority questions for review"
-    ws.cell(pq_row, 1).font = SECTION_TITLE_FONT
-    for i, hdr in enumerate(["Question ID", "Question", "Most common answer",
-                             "Normalised score", "Agreement", "Review flag"]):
-        c = ws.cell(pq_row + 1, 1 + i)
-        c.value = hdr
-        c.font = TABLE_HEADER_FONT
-        c.fill = PatternFill("solid", fgColor=HEADER_BG)
-        c.alignment = HEADER_ALIGN
-
-    for rank in range(1, 6):
-        r = pq_row + 1 + rank
-        bg = WHITE if (rank - 1) % 2 == 0 else ROW_ALT
-        for ci, src in enumerate(["B", "C", "D", "E", "F", "G"]):
-            cell = ws.cell(r, 1 + ci)
-            cell.value = (f"=IFERROR(INDEX('Priority Detail'!${src}:${src},"
-                          f"MATCH($B$3&\"|{rank}\",'Priority Detail'!$I:$I,0)),\"\")")
-            cell.font = TABLE_BODY_FONT
-            cell.fill = PatternFill("solid", fgColor=bg)
-            cell.alignment = LEFT_ALIGN
-        ws.cell(r, 4).number_format = "0.0%"
-
-    for col, w in {"A": 35.0, "B": 28.0, "D": 20.0, "E": 18.0}.items():
-        ws.column_dimensions[col].width = w
-    ws.row_dimensions[1].height = 33.75
-    ws.row_dimensions[3].height = 27.0
-    ws.freeze_panes = "A10"
-    ws.page_setup.orientation = "landscape"
-    ws.page_setup.fitToWidth = 1
-    ws.page_setup.fitToHeight = 1
-    ws.sheet_properties.pageSetUpPr.fitToPage = True
-    ws.print_area = "A1:H27"
-
-    # ── 5-8. Data sheets ──
-    data_sheets = [
-        ("Organisation Summary", "One row per organisation. Sort or filter by respondent count, score or agreement.",
-         odf, [47.71, 37, 14.14, 25, 22.71, 17.43, 25.71, 18.14, 17, 14.71, 27.29, 13, 19.43, 20.71, 12.57, 25.43, 20, 13], "A23", True),
-        ("Section Summary", "Section-level maturity and internal agreement for each organisation.",
-         sdf, [18.29, 15.71, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13], "A5", False),
-        ("Question Summary", "Question-level statistics. Use Review flag to find low-consensus scored questions.",
-         qdf, [45, 38, 13, 72, 12.29, 13, 60, 13, 10.86, 13, 13, 10.86, 9.71, 13, 13, 11.14, 11.57, 13], "D5", False),
-        ("Answer Distribution", "Counts and percentages by answer option. Multi-select totals can exceed 100%.",
-         ddf, [45, 20.57, 13.14, 72, 17.29, 65, 13.71, 16.29, 10.86, 16], "A5", False),
-    ]
-
-    for name, sub, frame, widths, freeze, add_filter in data_sheets:
-        ws = wb.create_sheet(name)
-        apply_data_sheet(ws, name, sub, list(frame.columns),
-                         frame.where(pd.notna(frame), None).values.tolist(),
-                         widths, freeze, add_filter)
-        if name == "Organisation Summary":
-            for r in range(5, 5 + len(frame)):
-                ws.cell(r, 10).number_format = ws.cell(r, 13).number_format = ws.cell(r, 18).number_format = "0.0%"
-        if name == "Section Summary":
-            for r in range(5, 5 + len(frame)):
-                ws.cell(r, 10).number_format = ws.cell(r, 11).number_format = "0.0%"
-        if name == "Question Summary":
-            for r in range(5, 5 + len(frame)):
-                ws.cell(r, 9).number_format = ws.cell(r, 16).number_format = "0.0%"
-        if name == "Answer Distribution":
-            for r in range(5, 5 + len(frame)):
-                ws.cell(r, 9).number_format = "0.0%"
-
-    # ── 9. Raw Answers ──
-    rframe = df.copy()
-    for c in RAW_OUT:
-        if c not in rframe.columns: rframe[c] = None
-    rframe = rframe[RAW_OUT]
-    ws = wb.create_sheet("Raw Answers")
-    apply_data_sheet(ws, None, "Imported source rows with an added Standard section field. Personal email is intentionally omitted from this analysis copy.",
-                     RAW_OUT, rframe.where(pd.notna(rframe), None).values.tolist(),
-                     [22.86, 17.71, 38, 10.71, 13.29, 70, 65, 14.71, 12, 12.71, 28, 13, 45, 17.14, 15.43, 20.14, 10.71, 13, 13, 12.71, 13, 13, 14.57],
-                     "A5", False)
-    # Apply navy banner even without title text
-    ws["A1"].fill = PatternFill("solid", fgColor=NAVY)
-    ws["A1"].font = TITLE_FONT
-    ws["A1"].alignment = Alignment(vertical="center")
-
-    # ── 10. Priority Detail (hidden) ──
-    rows = []
-    for org, g in qdf[qdf["Scored question"] == True].groupby("Organisation name"):
-        gg = g.copy()
-        gg["_review"] = (gg["Review flag"] == "Review").astype(int)
-        gg = gg.sort_values(["_review", "Normalised score", "Question ID"], ascending=[False, True, True])
-        for rank, (_, x) in enumerate(gg.iterrows(), 1):
-            rows.append([org, x["Question ID"], x["Question"], x["Most common answer"],
-                         x["Normalised score"], x["Agreement"], x["Review flag"], rank, f"{org}|{rank}"])
-
-    ws = wb.create_sheet("Priority Detail")
-    cols = ["Organisation", "Question ID", "Question", "Most common answer",
-            "Normalised score", "Agreement", "Review flag", "Priority rank", "Lookup key"]
-    for c, h in enumerate(cols, 1):
-        cell = ws.cell(1, c)
-        cell.value = h
-        cell.font = TABLE_HEADER_FONT
-        cell.fill = PatternFill("solid", fgColor=HEADER_BG)
-        cell.alignment = HEADER_ALIGN
-        cell.border = NO_BORDER
-    for r, row in enumerate(rows, 2):
-        bg = WHITE if (r - 2) % 2 == 0 else ROW_ALT
-        for c, v in enumerate(row, 1):
-            cell = ws.cell(r, c)
-            cell.value = v
-            cell.font = TABLE_BODY_FONT
-            cell.fill = PatternFill("solid", fgColor=bg)
-            cell.border = NO_BORDER
-    ws.sheet_state = "hidden"
-    ws.page_setup.orientation = "portrait"
-
-    # ── Finalise ──
     wb.calculation.fullCalcOnLoad = True
-    wb.calculation.forceFullCalc = True
     wb.calculation.calcMode = "auto"
     wb.active = wb.sheetnames.index("Dashboard")
     wb.save(out)
