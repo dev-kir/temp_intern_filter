@@ -346,75 +346,119 @@ QUESTION_WEIGHTS = {
 
 ## 4. Data Flow Diagram
 
+### 4.1 High-Level Pipeline
+
+```mermaid
+flowchart TD
+    INPUT["📂 INPUT: SARI_Results_*.xlsx\n6,771 rows × 24 columns\n1 row = 1 person × 1 question × 1 answer"]
+    
+    INPUT --> S1["STEP 1: read_raw_data()\nParse all rows into list of dicts\n6,771 records"]
+    S1 --> S2["STEP 2: build_question_order()\nCollect unique (section, qid)\nfrom EN sections only\n37 questions, 8 sections"]
+    S2 --> S3["STEP 3: build_org_data()\nGroup by Organisation Name\nBM→EN merge\nCollect answers + scores"]
+    
+    S3 --> S4["STEP 4: write_pivot_sheet()\nOne row per org\n37 question columns\nAnswers joined with ' | '"]
+    S3 --> S5["STEP 5: compute_section_scores()\nWeighted averages\nPer section + OVERALL\nUses QUESTION_WEIGHTS"]
+    
+    S4 --> PIVOT["📊 Pivot Sheet\n126 rows × 49 cols\nText answers"]
+    S5 --> SCORE["📊 Scorecard Sheet\n126 rows × 20 cols\nNumerical scores 0–4\nColor scale: R→Y→G"]
+    
+    S2 --> S7["STEP 7: write_question_ref_sheet()\n37 rows — qid → question text"]
+    S7 --> QREF["📊 Question Reference Sheet\n37 rows × 4 cols"]
+    
+    PIVOT --> OUTPUT["💾 OUTPUT: SARI_Results_Processed.xlsx\nSheet 1: Pivot (126 × 49)\nSheet 2: Scorecard (126 × 20)\nSheet 3: Question Reference (37 × 4)"]
+    SCORE --> OUTPUT
+    QREF --> OUTPUT
 ```
-┌─────────────────────────────────────────────────────────────────┐
-│                    INPUT: SARI_Results_*.xlsx                   │
-│                    6,771 rows × 24 columns                      │
-│               Each row = 1 person × 1 question × 1 answer       │
-└──────────────────────────────┬──────────────────────────────────┘
-                               │
-                               ▼
-┌─────────────────────────────────────────────────────────────────┐
-│  STEP 1: read_raw_data()                                        │
-│  Parse all rows into list of dicts                              │
-│  6,771 records                                                  │
-└──────────────────────────────┬──────────────────────────────────┘
-                               │
-                               ▼
-┌─────────────────────────────────────────────────────────────────┐
-│  STEP 2: build_question_order()                                 │
-│  Collect unique (section, qid) from EN sections only            │
-│  37 questions across 8 sections                                 │
-└──────────────────────────────┬──────────────────────────────────┘
-                               │
-                               ▼
-┌─────────────────────────────────────────────────────────────────┐
-│  STEP 3: build_org_data()                                       │
-│  ┌───────────────────────────────────────────────────────────┐  │
-│  │ For each row:                                             │  │
-│  │   a. Identify org (col 14)                                │  │
-│  │   b. Collect single-value fields (first seen)             │  │
-│  │   c. Collect multi-value fields (all unique)              │  │
-│  │   d. BM→EN merge: map BM section to EN section            │  │
-│  │   e. Collect answer texts (deduplicated set)              │  │
-│  │   f. Collect scores (all kept for averaging)              │  │
-│  └───────────────────────────────────────────────────────────┘  │
-│  Output: 126 orgs, each with {single, list, answers, scores}    │
-└──────────────────────────────┬──────────────────────────────────┘
-                               │
-                    ┌──────────┴──────────┐
-                    │                     │
-                    ▼                     ▼
-┌───────────────────────────┐ ┌───────────────────────────┐
-│  STEP 4: write_pivot()    │ │  STEP 5: compute_scores()  │
-│  One row per org          │ │  Weighted averages         │
-│  37 question columns      │ │  Per section + OVERALL     │
-│  Answers joined with " | "│ │  Uses QUESTION_WEIGHTS     │
-└───────────┬───────────────┘ └───────────┬───────────────┘
-            │                             │
-            ▼                             ▼
-┌───────────────────────────┐ ┌───────────────────────────┐
-│  Pivot Sheet              │ │  Scorecard Sheet           │
-│  126 rows × 49 columns    │ │  126 rows × 20 columns     │
-│  Text answers             │ │  Numerical scores (0–4)    │
-│                           │ │  Color scale: R→Y→G        │
-└───────────────────────────┘ └───────────────────────────┘
-            │                             │
-            └──────────┬──────────────────┘
-                       │
-                       ▼
-┌─────────────────────────────────────────────────────────────────┐
-│  STEP 7: Question Reference Sheet                               │
-│  37 rows — maps qid → full question text                        │
-└──────────────────────────┬──────────────────────────────────────┘
-                           │
-                           ▼
-┌─────────────────────────────────────────────────────────────────┐
-│              OUTPUT: SARI_Results_Processed.xlsx                │
-│              Sheet 1: Pivot (126 × 49)                          │
-│              Sheet 2: Scorecard (126 × 20)                      │
-│              Sheet 3: Question Reference (37 × 4)               │
-└─────────────────────────────────────────────────────────────────┘
+
+### 4.2 BM→EN Merge Detail
+
+```mermaid
+flowchart LR
+    subgraph RAW["Raw Data (6,771 rows)"]
+        EN_ROW["EN row\nsection='Background'\nqid='background_1'\nanswer='Exploring AI'"]
+        BM_ROW["BM row\nsection='Latar Belakang'\nqid='background_1'\nanswer='Sedang meneroka'"]
+    end
+    
+    subgraph MERGE["BM_TO_EN_SECTION mapping"]
+        MAP["'Latar Belakang' → 'Background'\n'Strategi & Kepimpinan' → 'Strategy & Leadership'\n... 8 mappings total"]
+    end
+    
+    subgraph RESULT["After Merge"]
+        COMBINED["(Background, background_1):\nanswers = {'Exploring AI', 'Sedang meneroka'}\nscores = [0, 0]"]
+    end
+    
+    EN_ROW --> MAP
+    BM_ROW --> MAP
+    MAP --> COMBINED
+```
+
+### 4.3 Scoring Pipeline (per organisation)
+
+```mermaid
+flowchart TD
+    subgraph INPUTS["Inputs per Org"]
+        SCORES["Raw scores per (section, qid)\nList of (score, max_score) tuples"]
+        WEIGHTS["QUESTION_WEIGHTS config\nPer-question weight (default 1.0)"]
+    end
+    
+    SCORES --> QAVG["Step A: Question Average\nq_avg = SUM(scores) / COUNT(scores)\nOne value per (section, qid)"]
+    
+    QAVG --> SECSCORE["Step B: Section Score (weighted)\nSUM(q_avg_i × weight_i) / SUM(weight_i)\nOne value per section"]
+    WEIGHTS --> SECSCORE
+    
+    SCORES --> OVERALL["Step C: OVERALL Score (weighted)\nSUM(score_j × weight_j) / SUM(weight_j)\nWeighted avg of ALL individual scores"]
+    WEIGHTS --> OVERALL
+    
+    SECSCORE --> OUTPUT["Scorecard Row\nSection scores + OVERALL\n0–4 scale, color-coded"]
+    OVERALL --> OUTPUT
+```
+
+### 4.4 Output Excel Structure
+
+```mermaid
+flowchart TD
+    subgraph PIVOT["Pivot Sheet"]
+        direction LR
+        P_ORG["Cols A-L\nOrg Info\n(12 columns)"] --- P_Q["Cols M-AW\nQuestion Columns\n(37 columns, 8 section groups)"]
+    end
+    
+    subgraph SCORECARD["Scorecard Sheet"]
+        direction LR
+        S_ORG["Cols A-L\nOrg Info\n(12 columns)"] --- S_SEC["Cols M-S\nSection Scores\n(7 columns)"] --- S_OVR["Col T\nOVERALL\n(1 column)"]
+    end
+    
+    subgraph QREF["Question Reference Sheet"]
+        Q_COLS["Section | Question ID | Question # | Question Text\n(37 rows)"]
+    end
+```
+
+### 4.5 Section → Question Mapping
+
+```mermaid
+flowchart LR
+    subgraph SECTIONS["8 Sections (37 questions total)"]
+        BG["Background\n4 questions\n❌ NOT SCORED"]
+        SL["Strategy & Leadership\n4 questions\n✅ SCORED"]
+        TC["Talent & Culture\n4 questions\n✅ SCORED"]
+        DM["Data Management\n5 questions\n✅ SCORED"]
+        IT["Infrastructure\n5 questions\n✅ SCORED"]
+        GV["Governance\n6 questions\n✅ SCORED"]
+        IV["Investment\n4 questions\n✅ SCORED"]
+        AI["AI Impact\n5 questions\n✅ SCORED"]
+    end
+    
+    BG -.->|"demographic only\nall scores = 0"| EXCLUDE["Excluded from\nScorecard"]
+    
+    SL --> SC["7 Scored Sections\n33 questions\n0–4 scale"]
+    TC --> SC
+    DM --> SC
+    IT --> SC
+    GV --> SC
+    IV --> SC
+    AI --> SC
+    
+    SC --> WEIGHTED["Weighted by\nQUESTION_WEIGHTS"]
+    WEIGHTED --> OVERALL["OVERALL Score"]
 ```
 
 ---

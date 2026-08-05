@@ -12,14 +12,14 @@ A Python script that reads the raw SARI survey Excel export and produces **3 she
 
 ## Quick Summary
 
-```
-1. READ raw Excel (6,771 rows)
-2. MERGE BM answers into EN sections (same question_id)
-3. GROUP by Organisation Name (126 orgs)
-4. BUILD Pivot sheet — one row per org, answers in columns
-5. COMPUTE weighted scores per section + OVERALL
-6. BUILD Scorecard sheet with color scale
-7. SAVE to output Excel
+```mermaid
+flowchart LR
+    A["📂 Raw Excel\n6,771 rows"] --> B["🔀 BM→EN Merge\n8 section mappings"]
+    B --> C["🏢 Group by Org\n126 orgs"]
+    C --> D["📊 Pivot Sheet\n1 row per org\n37 question columns"]
+    C --> E["📈 Scorecard\nWeighted scores\n0–4 + OVERALL"]
+    D --> F["💾 Output Excel\n3 sheets"]
+    E --> F
 ```
 
 - **Each row = one organisation** (126 rows, no duplicates)
