@@ -272,13 +272,26 @@ def apply_data_style(ws, start_row, end_row, num_cols):
                 cell.fill = LIGHT_FILL
 
 
-def auto_fit_cols(ws, num_cols, max_sample=200):
+def auto_fit_cols(ws, num_cols, org_col_count=0, max_sample=200):
+    """Auto-fit column widths. Org columns get wider max; question columns get narrower."""
     for col_idx in range(1, num_cols + 1):
-        max_width = len(str(ws.cell(row=1, column=col_idx).value or ""))
-        for r in range(2, min(ws.max_row + 1, max_sample + 2)):
+        header_len = len(str(ws.cell(row=1, column=col_idx).value or ""))
+        header2_len = len(str(ws.cell(row=2, column=col_idx).value or ""))
+        max_width = max(header_len, header2_len)
+
+        # Sample data rows for content width
+        for r in range(3, min(ws.max_row + 1, max_sample + 3)):
             cell_val = str(ws.cell(row=r, column=col_idx).value or "")
-            max_width = max(max_width, len(cell_val))
-        ws.column_dimensions[get_column_letter(col_idx)].width = min(max_width + 3, 50)
+            # Cap per-cell contribution to avoid one huge cell blowing up the column
+            max_width = max(max_width, min(len(cell_val), 60))
+
+        # Different max widths for org columns vs question columns
+        if col_idx <= org_col_count:
+            max_allowed = 40  # org columns can be wider
+        else:
+            max_allowed = 28  # question columns stay narrow, text wraps
+
+        ws.column_dimensions[get_column_letter(col_idx)].width = min(max_width + 2, max_allowed)
 
 
 # ═══════════════════════════════════════════════════════════════════════════
@@ -373,7 +386,7 @@ def write_pivot_sheet(wb, orgs: dict, questions: list[tuple]):
     apply_data_style(ws, 3, row_num - 1, total_cols)
     ws.freeze_panes = ws.cell(row=3, column=org_col_count + 1)
     ws.auto_filter.ref = f"A2:{get_column_letter(total_cols)}{row_num - 1}"
-    auto_fit_cols(ws, total_cols)
+    auto_fit_cols(ws, total_cols, org_col_count)
 
     return question_columns
 
@@ -497,7 +510,7 @@ def write_scorecard_sheet(wb, orgs: dict, questions: list[tuple]):
 
     ws.freeze_panes = ws.cell(row=2, column=len(OUTPUT_COLUMNS) + 1)
     ws.auto_filter.ref = f"A1:{get_column_letter(total_cols)}{row_num - 1}"
-    auto_fit_cols(ws, total_cols)
+    auto_fit_cols(ws, total_cols, len(OUTPUT_COLUMNS))
 
 
 # ═══════════════════════════════════════════════════════════════════════════
