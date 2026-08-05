@@ -41,7 +41,7 @@ CFG = {
     },
     "multi_select_question_ids": ["background_2", "background_3", "background_4"],
 }
-NAVY='17365D'; BLUE='2F75B5'; WHITE='FFFFFF'; LIGHT='DDEBF7'; GREEN='E2F0D9'; GRAY='F2F2F2'; RED='F4CCCC'
+NAVY='FF17365D'; BLUE='FF2F75B5'; WHITE='FFFFFFFF'; LIGHT='FFDDEBF7'; GREEN='FFE2F0D9'; GRAY='FFF2F2F2'; RED='FFF4CCCC'
 REQ=['Respondent ID','Submitted at','Question #','Question ID','Question','Answer','Answer value','Answer score','Max score','Participant name','Job title','Organisation name','Organisation type','Organisation size','Stakeholder category','PCDS sector','District','Role level','Department','Age band','Part of group','Parent company']
 RAW_OUT=['Respondent ID','Submitted at','Standard section','Question #','Question ID','Question','Answer','Answer value','Answer score','Max score','Participant name','Job title','Organisation name','Organisation type','Organisation size','Stakeholder category','PCDS sector','District','Role level','Department','Age band','Part of group','Parent company']
 
@@ -64,24 +64,28 @@ def mode_det(values):
     c=Counter(vals); m=max(c.values()); winners=sorted(k for k,v in c.items() if v==m)
     return winners[0],m
 
-def title(ws,text,subtitle,span):
+def title(ws,text,subtitle,span,font_size=16,font_name='Calibri',row1_height=27.75,row2_height=30):
     ws.sheet_view.showGridLines=False
     ws.merge_cells(start_row=1,start_column=1,end_row=1,end_column=span)
-    ws['A1']=text; ws['A1'].font=Font(size=18,bold=True,color=WHITE); ws['A1'].fill=PatternFill('solid',fgColor=NAVY); ws['A1'].alignment=Alignment(vertical='center'); ws.row_dimensions[1].height=30
+    if text is not None:
+        ws['A1']=text; ws['A1'].font=Font(name=font_name,size=font_size,bold=True,color=WHITE); ws['A1'].fill=PatternFill('solid',fgColor=NAVY); ws['A1'].alignment=Alignment(vertical='center')
+    ws.row_dimensions[1].height=row1_height
     ws.merge_cells(start_row=2,start_column=1,end_row=2,end_column=span)
-    ws['A2']=subtitle; ws['A2'].font=Font(size=10,color='666666'); ws['A2'].alignment=Alignment(wrap_text=True); ws.row_dimensions[2].height=30
+    ws['A2']=subtitle; ws['A2'].font=Font(size=10,color='666666'); ws['A2'].alignment=Alignment(wrap_text=True); ws.row_dimensions[2].height=row2_height
 
 def headers(ws,row,n):
     for c in range(1,n+1):
         x=ws.cell(row,c); x.fill=PatternFill('solid',fgColor=BLUE); x.font=Font(bold=True,color=WHITE); x.alignment=Alignment(wrap_text=True,vertical='center')
     ws.row_dimensions[row].height=32
 
-def write_table(ws,columns,rows,widths=None):
+def write_table(ws,columns,rows,widths=None,freeze='A5',add_filter=True):
     for c,h in enumerate(columns,1): ws.cell(4,c,h)
     headers(ws,4,len(columns))
     for r,row in enumerate(rows,5):
         for c,v in enumerate(row,1): ws.cell(r,c,v)
-    ws.freeze_panes='A5'; ws.auto_filter.ref=f'A4:{get_column_letter(len(columns))}{4+len(rows)}'
+    ws.freeze_panes=freeze
+    if add_filter:
+        ws.auto_filter.ref=f'A4:{get_column_letter(len(columns))}{4+len(rows)}'
     if widths:
         for c,w in enumerate(widths,1): ws.column_dimensions[get_column_letter(c)].width=w
 
@@ -162,18 +166,33 @@ def calculate(df,cfg):
 def build(df,odf,sdf,qdf,ddf,cfg,out):
     wb=Workbook(); wb.remove(wb.active); sections=cfg['section_order']
     # Read Me
-    ws=wb.create_sheet('Read Me'); title(ws,'SARI Organisation Statistics','Generated from the complete raw Answers export. No peer comparison or automated narrative is included.',8)
-    notes=[('Input','Source workbook Answers sheet.'),('Refresh','Run the generator again against the latest complete export.'),('Deduplication','Respondent ID + Question ID; last record retained.'),('Agreement','High >=80%; Moderate >=60%; Low <60%; Not measurable below two respondents.'),('Review flag','Consensus below 60% where agreement is measurable.'),('Scoring','Only Max score > 0 contributes to maturity.'),('Privacy','Email is omitted from Raw Answers.')]
+    ws=wb.create_sheet('Read Me'); title(ws,'SARI Organisation Statistics','Interactive organisation-level reporting workbook generated from the uploaded SARI results.',8,font_size=16,font_name='Calibri',row1_height=27.75)
+    notes=[
+        ('Purpose','Analyse questionnaire results by organisation, section, question and answer distribution.'),
+        ('Dashboard','Choose an organisation in cell B4. The section score table and chart update using formulas.'),
+        ('Organisation Summary','One row per organisation, including respondent count, maturity score, strongest/weakest sections and agreement.'),
+        ('Section Summary','Scored question results aggregated by organisation and standardised section.'),
+        ('Question Summary','Question-level mode, consensus, score statistics, agreement and review flags.'),
+        ('Answer Distribution','Counts and percentages for each answer option. Multi-select percentages may exceed 100% in total.'),
+        ('Scoring rule','Only rows where Max score is greater than zero are included in maturity scores. Background questions remain distribution-only.'),
+        ('Agreement rule','High: at least 80% selected the modal answer; Moderate: 60% to below 80%; Low: below 60%; not measurable for one respondent.'),
+        ('Caution','Results with one respondent represent an individual perception, not organisation-wide consensus.'),
+        ('Data standardisation','Sections are standardised using the Question ID prefix, preventing English and Malay labels from splitting the same section.'),
+        ('Refresh','This workbook is a snapshot. Re-run the analysis when new responses are added to the source export.'),
+        ('Enhancements in this version',''),
+        ('','Maturity tiers, distance to next tier and a printable Organisation Report are included.'),
+    ]
     for r,(a,b) in enumerate(notes,4): ws.cell(r,1,a).font=Font(bold=True,color=NAVY); ws.cell(r,2,b); ws.merge_cells(start_row=r,start_column=2,end_row=r,end_column=8)
-    ws.column_dimensions['A'].width=24; ws.column_dimensions['B'].width=95
+    ws.column_dimensions['A'].width=24; ws.column_dimensions['B'].width=100
+    ws.page_setup.orientation='portrait'
     # Lists
     ws=wb.create_sheet('Lists');
     for r,o in enumerate(odf['Organisation name'],1): ws.cell(r,1,o)
     ws.sheet_state='hidden'
+    ws.page_setup.orientation='portrait'
     # Dashboard
-    ws=wb.create_sheet('Dashboard'); title(ws,'Organisation Dashboard','Select an organisation to view the current results.',10)
+    ws=wb.create_sheet('Dashboard'); title(ws,'Organisation Dashboard','Select an organisation to view the current results.',10,font_size=16,font_name='Calibri',row1_height=27.75)
     ws['A4']='Selected organisation'; ws['B4']=odf.iloc[0]['Organisation name'] if len(odf) else ''; ws['B4'].fill=PatternFill('solid',fgColor=GREEN); ws['B4'].font=Font(bold=True,color='008000')
-    dv=DataValidation(type='list',formula1=f'=Lists!$A$1:$A${max(1,len(odf))}'); ws.add_data_validation(dv); dv.add(ws['B4'])
     items=[('A6','Respondents','A7','C'),('D6','Overall score','D7','J'),('G6','Strongest section','G7','K'),('A9','Weakest section','A10','L'),('D9','Agreement','D10','O'),('G9','Interpretation','G10','P'),('A12','Maturity tier','A13','Q'),('D12','Distance to next tier','D13','R'),('G12','Questions for review','G13','N')]
     for lc,label,vc,col in items:
         ws[lc]=label; ws[lc].font=Font(bold=True,color=NAVY); ws[vc]=f'=IFERROR(INDEX(\'Organisation Summary\'!${col}:${col},MATCH($B$4,\'Organisation Summary\'!$A:$A,0)),"")'; ws[vc].fill=PatternFill('solid',fgColor=LIGHT); ws[vc].font=Font(size=13,bold=True,color=NAVY); ws[vc].alignment=Alignment(wrap_text=True)
@@ -183,11 +202,12 @@ def build(df,odf,sdf,qdf,ddf,cfg,out):
     headers(ws,17,5)
     for r,s in enumerate(sections,18):
         ws.cell(r,1,s); ws.cell(r,2,f'=IFERROR(SUMIFS(\'Section Summary\'!$E:$E,\'Section Summary\'!$A:$A,$B$4,\'Section Summary\'!$B:$B,$A{r}),"")'); ws.cell(r,3,f'=IFERROR(SUMIFS(\'Section Summary\'!$J:$J,\'Section Summary\'!$A:$A,$B$4,\'Section Summary\'!$B:$B,$A{r}),"")'); ws.cell(r,4,f'=IFERROR(SUMIFS(\'Section Summary\'!$C:$C,\'Section Summary\'!$A:$A,$B$4,\'Section Summary\'!$B:$B,$A{r}),"")'); ws.cell(r,5,f'=IFERROR(LOOKUP(2,1/((\'Section Summary\'!$A$5:$A${4+len(sdf)}=$B$4)*(\'Section Summary\'!$B$5:$B${4+len(sdf)}=$A{r})),\'Section Summary\'!$L$5:$L${4+len(sdf)}),"")'); ws.cell(r,3).number_format='0.0%'
-    ch=BarChart(); ch.type='bar'; ch.title='Section maturity profile'; ch.add_data(Reference(ws,min_col=3,min_row=17,max_row=24),titles_from_data=True); ch.set_categories(Reference(ws,min_col=1,min_row=18,max_row=24)); ch.height=7; ch.width=12; ch.legend=None; ws.add_chart(ch,'G17'); ws.freeze_panes='A17'
-    for c,w in {'A':35,'B':18,'C':18,'D':22,'E':18,'F':4,'G':28,'H':18,'I':18,'J':18}.items(): ws.column_dimensions[c].width=w
+    ch=BarChart(); ch.type='bar'; ch.title='Section maturity profile'; ch.add_data(Reference(ws,min_col=3,min_row=17,max_row=24),titles_from_data=True); ch.set_categories(Reference(ws,min_col=1,min_row=18,max_row=24)); ch.height=7.5; ch.width=15; ch.legend=None; ws.add_chart(ch,'G17'); ws.freeze_panes='A17'
+    for c,w in {'A':42,'B':39.140625,'C':14,'D':15,'E':18,'F':13,'G':31.42578125,'H':13,'I':13,'J':13}.items(): ws.column_dimensions[c].width=w
+    ws.page_setup.orientation='portrait'
     # Organisation Report
-    ws=wb.create_sheet('Organisation Report'); title(ws,'SARI Organisation Report','Select an organisation. The page is formatted for printing.',8)
-    ws['A3']='Selected organisation'; ws['B3']=odf.iloc[0]['Organisation name'] if len(odf) else ''; ws['B3'].fill=PatternFill('solid',fgColor=GREEN); ws['B3'].font=Font(bold=True,color='008000'); dv2=DataValidation(type='list',formula1=f'=Lists!$A$1:$A${max(1,len(odf))}'); ws.add_data_validation(dv2); dv2.add(ws['B3'])
+    ws=wb.create_sheet('Organisation Report'); title(ws,'SARI Organisation Report','Select an organisation. The page is formatted for printing.',8,font_size=20,font_name='Cambria',row1_height=33.75)
+    ws['A3']='Selected organisation'; ws['B3']=odf.iloc[0]['Organisation name'] if len(odf) else ''; ws['B3'].fill=PatternFill('solid',fgColor=GREEN); ws['B3'].font=Font(bold=True,color='008000')
     items=[('A5','Overall score','B5','J'),('D5','Maturity tier','E5','Q'),('G5','Respondents','H5','C'),('A7','Strongest section','B7','K'),('D7','Weakest section','E7','L'),('G7','Agreement','H7','O')]
     for lc,label,vc,col in items: ws[lc]=label; ws[lc].font=Font(bold=True,color=NAVY); ws[vc]=f'=IFERROR(INDEX(\'Organisation Summary\'!${col}:${col},MATCH($B$3,\'Organisation Summary\'!$A:$A,0)),"")'; ws[vc].fill=PatternFill('solid',fgColor=LIGHT); ws[vc].alignment=Alignment(wrap_text=True)
     ws['B5'].number_format='0.0%';
@@ -197,15 +217,21 @@ def build(df,odf,sdf,qdf,ddf,cfg,out):
     ws['A20']='Priority questions for review'; ws['A20'].font=Font(size=12,bold=True,color=NAVY)
     for c,h in enumerate(['Question ID','Question','Most common answer','Normalised score','Agreement','Review flag'],1): ws.cell(21,c,h)
     headers(ws,21,6)
-    # Priority Detail created below; key structure supports formulas
     for i,r in enumerate(range(22,27),1):
         for c,col in enumerate(['B','C','D','E','F','G'],1): ws.cell(r,c,f'=IFERROR(INDEX(\'Priority Detail\'!${col}:${col},MATCH($B$3&"|{i}",\'Priority Detail\'!$I:$I,0)),"")')
         ws.cell(r,4).number_format='0.0%'
-    for c,w in enumerate([30,50,34,18,18,18,18,18],1): ws.column_dimensions[get_column_letter(c)].width=w
+    for c,w in enumerate([35,28,13,20,18,13,13,13],1): ws.column_dimensions[get_column_letter(c)].width=w
+    ws.freeze_panes='A10'
     ws.page_setup.orientation='landscape'; ws.page_setup.fitToWidth=1; ws.page_setup.fitToHeight=1; ws.sheet_properties.pageSetUpPr.fitToPage=True; ws.print_area='A1:H27'
     # Data sheets
-    for name,sub,frame,widths in [('Organisation Summary','One row per organisation. Sort or filter by respondent count, score or agreement.',odf,[42,31,12,22,22,18,25,18,14,14,34,34,18,20,18,30,20,20]),('Section Summary','Section-level maturity and internal agreement for each organisation.',sdf,[42,38,12,12,14,14,14,14,14,18,18,18]),('Question Summary','Question-level statistics. Use Review flag to find low-consensus scored questions.',qdf,[42,34,18,60,12,16,38,18,14,14,14,14,14,14,18,18,18,16]),('Answer Distribution','Counts and percentages by answer option. Multi-select totals can exceed 100%.',ddf,[42,34,18,60,18,42,14,20,14,20])]:
-        ws=wb.create_sheet(name); title(ws,name,sub,len(frame.columns)); write_table(ws,list(frame.columns),frame.where(pd.notna(frame),None).values.tolist(),widths)
+    for name,sub,frame,widths,freeze,add_filter in [
+        ('Organisation Summary','One row per organisation. Sort or filter by respondent count, score or agreement.',odf,[47.7109375,37,14.140625,25,22.7109375,17.42578125,25.7109375,18.140625,17,14.7109375,27.28515625,13,19.42578125,20.7109375,12.5703125,25.42578125,20,13],'A23',True),
+        ('Section Summary','Section-level maturity and internal agreement for each organisation.',sdf,[18.28515625,15.7109375,13,13,13,13,13,13,13,13,13,13],'A5',False),
+        ('Question Summary','Question-level statistics. Use Review flag to find low-consensus scored questions.',qdf,[45,38,13,72,12.28515625,13,60,13,10.85546875,13,13,10.85546875,9.7109375,13,13,11.140625,11.5703125,13],'D5',False),
+        ('Answer Distribution','Counts and percentages by answer option. Multi-select totals can exceed 100%.',ddf,[45,20.5703125,13.140625,72,17.28515625,65,13.7109375,16.28515625,10.85546875,16],'A5',False),
+    ]:
+        ws=wb.create_sheet(name); title(ws,name,sub,len(frame.columns),font_size=16,font_name='Calibri',row1_height=27.75); write_table(ws,list(frame.columns),frame.where(pd.notna(frame),None).values.tolist(),widths,freeze,add_filter)
+        ws.page_setup.orientation='portrait'
         if name=='Organisation Summary':
             for r in range(5,5+len(frame)): ws.cell(r,10).number_format=ws.cell(r,13).number_format=ws.cell(r,18).number_format='0.0%'
         if name=='Section Summary':
@@ -219,7 +245,12 @@ def build(df,odf,sdf,qdf,ddf,cfg,out):
     for c in RAW_OUT:
         if c not in rframe.columns: rframe[c]=None
     rframe=rframe[RAW_OUT]
-    ws=wb.create_sheet('Raw Answers'); title(ws,'Raw Answers','Imported source rows with Standard section added. Email is omitted.',len(RAW_OUT)); write_table(ws,RAW_OUT,rframe.where(pd.notna(rframe),None).values.tolist(),[22,18,34,12,18,60,42,18,14,14,28,24,42,31,18,31,25,16,24,28,14,16,26])
+    ws=wb.create_sheet('Raw Answers'); title(ws,None,'Imported source rows with an added Standard section field. Personal email is intentionally omitted from this analysis copy.',len(RAW_OUT),font_size=16,font_name='Calibri',row1_height=27.75); write_table(ws,RAW_OUT,rframe.where(pd.notna(rframe),None).values.tolist(),[22.85546875,17.7109375,38,10.7109375,13.28515625,70,65,14.7109375,12,12.7109375,28,13,45,17.140625,15.42578125,20.140625,10.7109375,13,13,12.7109375,13,13,14.5703125],'A5',False)
+    # Apply navy fill to A1 even though no title text
+    ws['A1'].fill=PatternFill('solid',fgColor=NAVY)
+    ws['A1'].font=Font(name='Calibri',size=16,bold=True,color=WHITE)
+    ws['A1'].alignment=Alignment(vertical='center')
+    ws.page_setup.orientation='portrait'
     # Priority helper
     rows=[]
     for org,g in qdf[qdf['Scored question']==True].groupby('Organisation name'):
@@ -230,6 +261,7 @@ def build(df,odf,sdf,qdf,ddf,cfg,out):
     for r,row in enumerate(rows,2):
         for c,v in enumerate(row,1): ws.cell(r,c,v)
     ws.sheet_state='hidden'
+    ws.page_setup.orientation='portrait'
     wb.calculation.fullCalcOnLoad=True; wb.calculation.forceFullCalc=True; wb.calculation.calcMode='auto'; wb.active=wb.sheetnames.index('Dashboard'); wb.save(out)
 
 def main():
