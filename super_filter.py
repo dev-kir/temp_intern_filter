@@ -361,7 +361,7 @@ def write_pivot_sheet(wb, orgs: dict, questions: list[tuple]):
         list_values = {}
         for key in ["role_level", "department", "age_band", "job_title"]:
             vals = sorted(o["list"].get(key, set()))
-            list_values[key] = " | ".join(vals) if vals else ""
+            list_values[key] = "\n".join(f"{i}. {v}" for i, v in enumerate(vals, 1)) if vals else ""
 
         for col_idx, (_, key, agg_type) in enumerate(OUTPUT_COLUMNS, 1):
             if agg_type == "single":
@@ -458,7 +458,7 @@ def write_scorecard_sheet(wb, orgs: dict, questions: list[tuple]):
         list_values = {}
         for key in ["role_level", "department", "age_band", "job_title"]:
             vals = sorted(o["list"].get(key, set()))
-            list_values[key] = " | ".join(vals) if vals else ""
+            list_values[key] = "\n".join(f"{i}. {v}" for i, v in enumerate(vals, 1)) if vals else ""
 
         # Org-level columns
         for col_idx, (_, key, agg_type) in enumerate(OUTPUT_COLUMNS, 1):
