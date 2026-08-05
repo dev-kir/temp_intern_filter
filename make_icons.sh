@@ -1,5 +1,5 @@
 #!/bin/bash
-# Regenerate every icon format from icon.svg. Run this after editing the SVG.
+# Regenerate every icon format from assets/icon.svg. Run this after editing the SVG.
 #
 #   ./make_icons.sh
 #
@@ -23,7 +23,7 @@ TMP=$(mktemp -d)
 trap 'rm -rf "$TMP"' EXIT
 
 for s in 16 32 64 128 256 512 1024; do
-  rsvg-convert -w $s -h $s icon.svg -o "$TMP/r$s.png"
+  rsvg-convert -w $s -h $s assets/icon.svg -o "$TMP/r$s.png"
 done
 
 # ── macOS ──
@@ -38,7 +38,7 @@ cp "$TMP/r256.png"  "$IS/icon_256x256.png"
 cp "$TMP/r512.png"  "$IS/icon_256x256@2x.png"
 cp "$TMP/r512.png"  "$IS/icon_512x512.png"
 cp "$TMP/r1024.png" "$IS/icon_512x512@2x.png"
-iconutil -c icns "$IS" -o icon.icns
+iconutil -c icns "$IS" -o assets/icon.icns
 
 # ── Windows and Tk ──
 "$PY" - "$TMP" <<'PYEOF'
@@ -48,9 +48,9 @@ tmp = sys.argv[1]
 pairs = [(16, 16), (24, 32), (32, 32), (48, 64), (64, 64), (128, 128), (256, 256)]
 imgs = [Image.open(f"{tmp}/r{src}.png").convert("RGBA").resize((out, out), Image.LANCZOS)
         for out, src in pairs]
-imgs[-1].save("icon.ico", format="ICO", sizes=[(o, o) for o, _ in pairs])
-Image.open(f"{tmp}/r512.png").convert("RGBA").save("icon.png")
+imgs[-1].save("assets/icon.ico", format="ICO", sizes=[(o, o) for o, _ in pairs])
+Image.open(f"{tmp}/r512.png").convert("RGBA").save("assets/icon.png")
 PYEOF
 
-ls -lh icon.svg icon.png icon.ico icon.icns
+ls -lh assets/icon.svg assets/icon.png assets/icon.ico assets/icon.icns
 echo "done"

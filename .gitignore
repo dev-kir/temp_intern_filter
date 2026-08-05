@@ -1,22 +1,37 @@
-# Environments and build output
+# ── Python ──
 venv/
+.venv/
 __pycache__/
-*.pyc
+*.py[cod]
+*.egg-info/
+
+# ── Build output ──
+# The .app and .exe are 13-60 MB. They belong in GitHub Releases, which the CI
+# workflow publishes on every v* tag, never in the repository itself.
 build/
 dist/
+*.zip
+# PyInstaller writes a spec beside the script when invoked without one.
+# app.spec is the real, committed recipe; anything else is a leftover.
+/Super Filter.spec
 *.spec.bak
 
-# Survey data and generated workbooks — these carry respondent names and job
-# titles. This repository is public. Nothing derived from real responses goes in.
+# ── Survey data and generated workbooks ──
+# These carry respondent names and job titles. This repository is public.
+# Nothing derived from real responses belongs in it.
 SARI_*.xlsx
 *_Results_*.xlsx
 *_Processed.xlsx
+*_Organisation.xlsx
 test.xlsx
-*.zip
 
-# Scratch copies of earlier generators
+# ── Local reference material, not part of the tool ──
+# Earlier generators and scratch copies kept only for comparison.
+_reference/
 OLD/
 sari_generator/
 sari_complete_fixed_generator/
 
+# ── OS ──
 .DS_Store
+Thumbs.db

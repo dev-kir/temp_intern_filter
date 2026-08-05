@@ -19,11 +19,11 @@ import sys
 # All three icon files are rendered from icon.svg by make_icons.sh. PyInstaller wants
 # a .ico to embed in a Windows .exe and a .icns for a macOS bundle; icon.png is the
 # one Tk itself can load at runtime for the window icon, so it ships as data.
-EXE_ICON = 'icon.ico' if sys.platform == 'win32' else 'icon.icns'
+EXE_ICON = 'assets/icon.ico' if sys.platform == 'win32' else 'assets/icon.icns'
 
 datas = [
     ('report_template.xlsx', '.'),
-    ('icon.png', '.'),
+    ('assets/icon.png', '.'),
 ]
 
 hiddenimports = [
@@ -81,7 +81,7 @@ coll = COLLECT(
 app = BUNDLE(
     coll,
     name='Super Filter.app',
-    icon='icon.icns',
+    icon='assets/icon.icns',
     bundle_identifier='com.ammar.superfilter',
     info_plist={
         'CFBundleShortVersionString': '1.0.0',

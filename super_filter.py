@@ -331,16 +331,21 @@ def build(input_file,template_file,output_file,data=None,progress=None):
 # ═══════════════════════════════════════════════════════════════════════════
 
 def resource_path(name):
-    """Locate a bundled data file.
+    """Locate a data file whether running from source or from a frozen bundle.
 
-    A frozen app unpacks its data into sys._MEIPASS, NOT next to the module, so
-    Path(__file__).with_name() silently points at a file that is not there.
+    A frozen app unpacks its data flat into sys._MEIPASS, NOT next to the module,
+    so Path(__file__).with_name() silently points at a file that is not there.
+    From source the same files live beside this module or under assets/.
     """
+    here=Path(__file__).resolve().parent
+    roots=[]
     base=getattr(sys,'_MEIPASS',None)
-    if base:
-        p=Path(base)/name
+    if base: roots.append(Path(base))
+    roots += [here, here/'assets']
+    for r in roots:
+        p=r/name
         if p.exists(): return str(p)
-    return str(Path(__file__).resolve().with_name(name))
+    return str(here/name)
 
 INPUT_FILE = "SARI_Results_2026-08-04-00-36-28.xlsx"
 OUTPUT_FILE = "SARI_Organisation.xlsx"
