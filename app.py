@@ -36,37 +36,36 @@ except Exception:
 NAVY = "#163A63"
 HEADER_BG = "#2F5496"
 WHITE = "#FFFFFF"
-TOOLBAR = "#F0F0F0"
 DROPZONE = "#F7F9FC"
 TEXT = "#1F1F1F"
 GREY = "#6E6E6E"
-GREEN = "#2E7D32"
-ORANGE = "#B36B00"
-RED = "#C62828"
+LINE = "#DDE3EA"      # the only divider in the window, under the column headings
+STRIPE = "#F7F9FB"    # alternating row wash, quiet enough not to read as a band
 
 ALL_ORGS = "All organisations"
 
-# Column label, source index in sf.ORG_HEADERS, width, formatter
+# The on-screen table shows what is worth scanning and nothing more, so it fits the
+# window without sideways scrolling. Every one of the 18 fields is still written to
+# the exported workbook — this list only governs the display.
+#
+# label, index in sf.ORG_HEADERS, width, formatter, anchor, stretch
 COLUMNS = [
-    ("Organisation name",   0, 300, str),
-    ("Type",                1, 190, str),
-    ("Resp",                2,  50, "int"),
-    ("Depts",               3,  55, "int"),
-    ("Roles",               4,  55, "int"),
-    ("Size",                5,  70, str),
-    ("Sector",              6, 150, str),
-    ("Latest submission",   7, 130, str),
-    ("Avg score",           8,  75, "f2"),
-    ("Overall",             9,  70, "pct"),
-    ("Strongest section",  10, 190, str),
-    ("Weakest section",    11, 190, str),
-    ("Consensus",          12,  80, "f2"),
-    ("Review qs",          13,  70, "int"),
-    ("Agreement",          14,  90, str),
-    ("Interpretation",     15, 180, str),
-    ("Maturity tier",      16, 120, str),
-    ("To next tier",       17,  85, "pct"),
+    ("Organisation name",   0, 280, str,   tk.W,      True),
+    ("Type",                1, 140, str,   tk.W,      True),
+    ("Resp",                2,  52, "int", tk.CENTER, False),
+    ("Size",                5,  72, str,   tk.CENTER, False),
+    ("Sector",              6, 120, str,   tk.W,      True),
+    ("Avg score",           8,  70, "f2",  tk.CENTER, False),
+    ("Overall",             9,  76, "pct", tk.CENTER, False),
+    ("Strongest section",  10, 140, str,   tk.W,      True),
+    ("Weakest section",    11, 140, str,   tk.W,      True),
+    ("Agreement",          14,  86, str,   tk.CENTER, False),
+    ("Maturity tier",      16, 112, str,   tk.W,      False),
 ]
+
+# Shown only in the exported workbook: Departments represented, Role levels
+# represented, Latest submission, Average consensus, Questions for review,
+# Interpretation, Distance to next tier.
 
 
 def fmt(value, kind):
@@ -112,16 +111,19 @@ class SuperFilterApp:
                                    fg="#AABBCC", bg=NAVY)
         self.status_lbl.pack(side=tk.RIGHT, padx=20)
 
-        tb = tk.Frame(self.root, bg=TOOLBAR, height=44)
+        # The toolbar shares the table's background so the window reads as one
+        # surface rather than a stack of separate grey strips.
+        tb = tk.Frame(self.root, bg=WHITE, height=48)
         tb.pack(fill=tk.X)
         tb.pack_propagate(False)
 
         tk.Button(tb, text="Open Excel...", command=self._choose_file,
                   font=("Calibri", 10), bg=WHITE, relief=tk.FLAT,
-                  padx=14, pady=4, cursor="hand2").pack(side=tk.LEFT, padx=10, pady=6)
+                  highlightthickness=1, highlightbackground=LINE,
+                  padx=14, pady=4, cursor="hand2").pack(side=tk.LEFT, padx=(14, 0), pady=9)
 
         tk.Label(tb, text="Organisation:", font=("Calibri", 10, "bold"),
-                 bg=TOOLBAR, fg=TEXT).pack(side=tk.LEFT, padx=(18, 6))
+                 bg=WHITE, fg=TEXT).pack(side=tk.LEFT, padx=(18, 6))
         self.org_var = tk.StringVar(value=ALL_ORGS)
         self.org_combo = ttk.Combobox(tb, textvariable=self.org_var, state="readonly",
                                       font=("Calibri", 10), width=38, values=[ALL_ORGS])
@@ -129,20 +131,21 @@ class SuperFilterApp:
         self.org_combo.bind("<<ComboboxSelected>>", lambda e: self._refresh())
 
         tk.Label(tb, text="Search:", font=("Calibri", 10, "bold"),
-                 bg=TOOLBAR, fg=TEXT).pack(side=tk.LEFT, padx=(18, 6))
+                 bg=WHITE, fg=TEXT).pack(side=tk.LEFT, padx=(18, 6))
         self.search_var = tk.StringVar()
         self.search_var.trace_add("write", lambda *a: self._refresh())
         tk.Entry(tb, textvariable=self.search_var, font=("Calibri", 10),
-                 width=22).pack(side=tk.LEFT, pady=6)
+                 relief=tk.FLAT, highlightthickness=1, highlightbackground=LINE,
+                 width=22).pack(side=tk.LEFT, pady=9)
 
         self.export_btn = tk.Button(tb, text="Export Full Report", command=self._export,
                                     font=("Calibri", 10, "bold"), bg=HEADER_BG, fg=WHITE,
                                     activebackground=NAVY, activeforeground=WHITE,
                                     relief=tk.FLAT, padx=14, pady=4, cursor="hand2")
-        self.export_btn.pack(side=tk.RIGHT, padx=10, pady=6)
+        self.export_btn.pack(side=tk.RIGHT, padx=(0, 14), pady=9)
 
         self.main = tk.Frame(self.root, bg=WHITE)
-        self.main.pack(fill=tk.BOTH, expand=True, padx=10, pady=8)
+        self.main.pack(fill=tk.BOTH, expand=True, padx=14, pady=(0, 10))
         self._show_dropzone()
 
     def _show_dropzone(self):
@@ -224,34 +227,48 @@ class SuperFilterApp:
 
         labels = [c[0] for c in COLUMNS]
         style = ttk.Style()
-        style.configure("Summary.Treeview", rowheight=24, font=("Calibri", 10))
-        style.configure("Summary.Treeview.Heading", font=("Calibri", 10, "bold"))
+        style.theme_use("clam")          # the only theme that honours these colours on macOS
+        style.configure("Summary.Treeview",
+                        background=WHITE, fieldbackground=WHITE, foreground=TEXT,
+                        rowheight=26, font=("Calibri", 11),
+                        borderwidth=0, relief=tk.FLAT)
+        # Headings sit on the same white as the rows, separated by one hairline only,
+        # so the header does not read as a panel bolted on top of the body.
+        style.configure("Summary.Treeview.Heading",
+                        background=WHITE, foreground=GREY,
+                        font=("Calibri", 10, "bold"),
+                        relief=tk.FLAT, borderwidth=0, padding=(6, 8))
+        style.map("Summary.Treeview.Heading", background=[("active", STRIPE)])
+        style.map("Summary.Treeview",
+                  background=[("selected", "#DCE7F5")],
+                  foreground=[("selected", TEXT)])
+        style.layout("Summary.Treeview", [
+            ("Summary.Treeview.treearea", {"sticky": "nswe"})])
 
+        # No horizontal scrollbar: the columns above are sized to fit the window.
         self.tree = ttk.Treeview(frame, columns=labels, show="headings",
-                                 style="Summary.Treeview")
+                                 style="Summary.Treeview", selectmode="browse")
         vsb = ttk.Scrollbar(frame, orient=tk.VERTICAL, command=self.tree.yview)
-        hsb = ttk.Scrollbar(frame, orient=tk.HORIZONTAL, command=self.tree.xview)
-        self.tree.configure(yscrollcommand=vsb.set, xscrollcommand=hsb.set)
+        self.tree.configure(yscrollcommand=vsb.set)
 
-        self.tree.grid(row=0, column=0, sticky="nsew")
-        vsb.grid(row=0, column=1, sticky="ns")
-        hsb.grid(row=1, column=0, sticky="ew")
-        frame.grid_rowconfigure(0, weight=1)
-        frame.grid_columnconfigure(0, weight=1)
+        self.tree.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+        vsb.pack(side=tk.RIGHT, fill=tk.Y)
 
-        for label, idx, width, _ in COLUMNS:
-            self.tree.heading(label, text=label,
+        for label, idx, width, _, anchor, stretch in COLUMNS:
+            self.tree.heading(label, text=label, anchor=anchor,
                               command=lambda i=idx: self._sort_by(i))
-            anchor = tk.W if width >= 120 else tk.CENTER
-            self.tree.column(label, width=width, minwidth=45, anchor=anchor)
+            self.tree.column(label, width=width, minwidth=44,
+                             anchor=anchor, stretch=stretch)
 
-        self.tree.tag_configure("high", foreground=GREEN)
-        self.tree.tag_configure("mid", foreground=ORANGE)
-        self.tree.tag_configure("low", foreground=RED)
+        # Text stays the default colour in every column, matching the workbook, where
+        # only Overall score carries a colour scale. Tkinter's table colours whole rows
+        # and never single cells, so an alternating wash carries readability instead.
+        self.tree.tag_configure("odd", background=STRIPE)
 
+        tk.Frame(self.main, bg=LINE, height=1).pack(fill=tk.X)
         self.count_lbl = tk.Label(self.main, text="", font=("Calibri", 9),
                                   bg=WHITE, fg=GREY, anchor=tk.W)
-        self.count_lbl.pack(fill=tk.X, pady=(4, 0))
+        self.count_lbl.pack(fill=tk.X, pady=(6, 0))
 
         self._refresh()
 
@@ -270,13 +287,9 @@ class SuperFilterApp:
                 continue
             if search and search not in name.lower():
                 continue
-            values = tuple(fmt(row[idx], kind) for _, idx, _, kind in COLUMNS)
-
-            overall = row[9]
-            tag = ""
-            if isinstance(overall, (int, float)):
-                tag = "high" if overall >= 0.75 else "mid" if overall >= 0.50 else "low"
-            self.tree.insert("", tk.END, values=values, tags=(tag,) if tag else ())
+            values = tuple(fmt(row[idx], kind) for _, idx, _, kind, _, _ in COLUMNS)
+            self.tree.insert("", tk.END, values=values,
+                             tags=("odd",) if shown % 2 else ())
             shown += 1
 
         self.count_lbl.config(text=f"Showing {shown} of {len(self.rows)} organisations")

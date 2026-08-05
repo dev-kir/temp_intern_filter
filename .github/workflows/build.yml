@@ -1,0 +1,106 @@
+name: build
+
+# PyInstaller cannot cross-compile: a Mac produces only a .app, a Windows machine
+# produces only a .exe. This builds each on its own runner from the same app.py.
+#
+#   push to main   -> both builds appear under the run's Artifacts (90 days)
+#   push a v* tag  -> both are attached to a Release, which is the link to send people
+#
+# Cutting a release:
+#   git tag v1.0.0 && git push origin v1.0.0
+
+on:
+  push:
+    branches: [main]
+    tags: ['v*']
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    name: ${{ matrix.label }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: windows-latest
+            label: windows
+            artifact: SuperFilter-windows
+          - os: macos-latest
+            label: macos
+            artifact: SuperFilter-macos
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: pip
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt pyinstaller
+
+      - name: Build
+        run: pyinstaller app.spec --noconfirm
+
+      # Fail loudly here rather than shipping an app that dies on first export.
+      # An empty datas list in app.spec builds perfectly and breaks at runtime.
+      - name: Verify the template was bundled
+        shell: bash
+        run: |
+          if [ -f "dist/Super Filter.app/Contents/Resources/report_template.xlsx" ] \
+          || [ -f "dist/Super Filter.app/Contents/Frameworks/report_template.xlsx" ] \
+          || [ -f "dist/SuperFilter/_internal/report_template.xlsx" ] \
+          || [ -f "dist/SuperFilter/report_template.xlsx" ]; then
+            echo "report_template.xlsx is in the bundle"
+          else
+            echo "report_template.xlsx MISSING from the build — export would fail"
+            find dist -name "report_template.xlsx" || true
+            exit 1
+          fi
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.artifact }}
+          path: dist/
+          if-no-files-found: error
+
+  release:
+    name: attach to release
+    needs: build
+    if: startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+
+      - name: Zip each platform
+        run: |
+          cd artifacts
+          for d in */; do
+            name="${d%/}"
+            (cd "$d" && zip -qr "../${name}.zip" .)
+            echo "packed ${name}.zip"
+          done
+          ls -lh *.zip
+
+      - name: Publish release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: artifacts/*.zip
+          generate_release_notes: true
+          body: |
+            **Windows** — download `SuperFilter-windows.zip`, unzip, run `SuperFilter.exe`.
+            SmartScreen will warn once because the build is unsigned: *More info* → *Run anyway*.
+
+            **macOS** — download `SuperFilter-macos.zip`, unzip, right-click `Super Filter.app` → *Open* → *Open*.
+
+            Unzip the whole folder before running. The app needs `report_template.xlsx`
+            and its libraries sitting next to the executable.

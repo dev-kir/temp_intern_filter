@@ -49,11 +49,14 @@ The GUI calls `compute()` to draw the Organisation Summary and hands the *same* 
 ## GUI Features
 
 - **Drag and drop** a `.xlsx` onto the window, or click the drop zone to browse
-- **Organisation Summary table** — every column, sortable by clicking any heading
+- **Organisation Summary table** — sortable by clicking any heading
 - **Organisation dropdown** — jump to one organisation
 - **Search** — free-text filter on organisation name
-- **Colour-coded rows** — green (overall ≥ 75%), orange (≥ 50%), red (below)
 - **Export** — writes the full 10-sheet workbook on a background thread, with progress, so the window stays responsive
+
+The table shows the 11 columns worth scanning, sized to fit the window so there is no sideways scrolling. The remaining seven — Departments represented, Role levels represented, Latest submission, Average consensus, Questions for review, Interpretation, Distance to next tier — are in the exported workbook.
+
+Text is the default colour in every column, matching the workbook where only *Overall score* carries a colour scale. Tkinter's table colours whole rows and never single cells, so a faint alternating row wash does the readability job instead.
 
 ## Maturity Tiers
 
@@ -85,6 +88,24 @@ Bahasa Malaysia sections are mapped to English via Question ID prefix:
 # Building a standalone app
 
 For users who should not have to install Python at all.
+
+## Just send someone the app
+
+Point them at **[Releases](https://github.com/dev-kir/temp_intern_filter/releases)**. Every `v*` tag builds both platforms automatically and attaches them:
+
+| They use | They download | They run |
+|---|---|---|
+| Windows | `SuperFilter-windows.zip` | unzip, then `SuperFilter.exe` |
+| macOS | `SuperFilter-macos.zip` | unzip, right-click `Super Filter.app` → *Open* |
+
+**Unzip the whole folder before running.** The executable needs its libraries and `report_template.xlsx` beside it; the bare `.exe` on its own will not work.
+
+To cut a new one:
+
+```bash
+git tag v1.0.0
+git push origin v1.0.0
+```
 
 ## The one rule
 

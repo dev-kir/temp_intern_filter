@@ -31,7 +31,10 @@ a = Analysis(
     hookspath=[],
     hooksconfig={},
     runtime_hooks=[],
-    excludes=['streamlit', 'altair', 'pyarrow', 'matplotlib', 'IPython', 'pytest'],
+    # pandas and numpy were dropped when the GUI stopped doing its own maths.
+    # Excluding them explicitly keeps the build around 25 MB instead of 70 MB.
+    excludes=['pandas', 'numpy', 'streamlit', 'altair', 'pyarrow',
+              'matplotlib', 'IPython', 'pytest'],
     noarchive=False,
     optimize=0,
 )
