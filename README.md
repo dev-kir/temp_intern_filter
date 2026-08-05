@@ -48,7 +48,7 @@ Here's what the script does, step by step:
 
 ## Setup & Run
 
-### First time (on any laptop)
+### CLI version (command line)
 
 ```bash
 # 1. Create virtual environment
@@ -61,16 +61,24 @@ source venv/bin/activate        # macOS / Linux
 # 3. Install dependencies
 pip install -r requirements.txt
 
-# 4. Run the script
+# 4. Run
 python super_filter.py
 ```
 
-### Subsequent runs
+### GUI version (browser-based)
 
 ```bash
-source venv/bin/activate        # activate the venv
-python super_filter.py          # run
+source venv/bin/activate
+streamlit run app.py
 ```
+
+Opens in your browser at `http://localhost:8501`. Features:
+- Upload Excel file via drag-and-drop
+- Toggle org columns and scorecard sections on/off
+- Set custom question weightage (0–10)
+- View Pivot, Scorecard, and Question Reference in tabs
+- Filter by organisation name
+- Export to Excel with current settings
 
 The output file `SARI_Results_Processed.xlsx` will appear in the same folder.
 
@@ -260,7 +268,8 @@ SCORECARD_SECTIONS = [
 
 ```
 ammar_super_filter/
-├── super_filter.py                          # Main processing script
+├── super_filter.py                          # CLI processing script
+├── app.py                                   # Streamlit GUI app
 ├── requirements.txt                         # Python dependencies (pinned versions)
 ├── README.md                                # This file
 ├── Super_Filter.md                          # Original design brief
