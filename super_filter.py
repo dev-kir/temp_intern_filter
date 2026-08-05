@@ -384,7 +384,8 @@ def write_pivot_sheet(wb, orgs: dict, questions: list[tuple]):
         row_num += 1
 
     apply_data_style(ws, 3, row_num - 1, total_cols)
-    ws.freeze_panes = ws.cell(row=3, column=org_col_count + 1)
+    # Freeze only the org name column + header rows so user can scroll through questions
+    ws.freeze_panes = "B3"
     ws.auto_filter.ref = f"A2:{get_column_letter(total_cols)}{row_num - 1}"
     auto_fit_cols(ws, total_cols, org_col_count)
 
@@ -508,7 +509,8 @@ def write_scorecard_sheet(wb, orgs: dict, questions: list[tuple]):
         ),
     )
 
-    ws.freeze_panes = ws.cell(row=2, column=len(OUTPUT_COLUMNS) + 1)
+    # Freeze only org name column + header so user can scroll through sections
+    ws.freeze_panes = "B2"
     ws.auto_filter.ref = f"A1:{get_column_letter(total_cols)}{row_num - 1}"
     auto_fit_cols(ws, total_cols, len(OUTPUT_COLUMNS))
 

@@ -4,9 +4,43 @@ A Python script that reads the raw SARI survey Excel export and produces **3 she
 
 | Sheet | Purpose |
 |---|---|
-| **Pivot** | One row per org, 74 question columns — see what each org answered |
+| **Pivot** | One row per org, 37 question columns — see what each org answered |
 | **Scorecard** | One row per org, per-section average scores + **OVERALL** — measure performance |
 | **Question Reference** | Maps question IDs to full question text |
+
+## Algorithm (Simple English)
+
+Here's what the script does, step by step:
+
+```
+1. READ the raw Excel file (6,771 rows, each row = one person's answer to one question)
+
+2. For each row, if the section is in Bahasa Malaysia (e.g. "Latar Belakang"),
+   MAP it to the English section (e.g. "Background") using the same question_id.
+   This merges BM and EN answers together.
+
+3. GROUP all rows by Organisation Name (126 unique orgs)
+
+4. For each organisation, collect:
+   - Single-value fields: take the first value (Org Type, Size, Sector, etc.)
+   - Multi-value fields: collect ALL unique values (Role Level, Department, etc.)
+   - Question answers: collect ALL unique answers per (section, question_id)
+   - Question scores: collect ALL scores per (section, question_id)
+
+5. BUILD the Pivot sheet:
+   - One row per organisation
+   - Left side: org info columns
+   - Right side: one column per question (37 columns, grouped by 8 sections)
+   - Each cell = all unique answers joined with " | "
+
+6. BUILD the Scorecard sheet:
+   - One row per organisation
+   - For each section: average of all question scores in that section
+   - OVERALL: average of ALL individual participant scores
+   - Color scale: red (low) → yellow → green (high)
+
+7. SAVE to a new Excel file with 3 sheets
+```
 
 - **Each row = one organisation** (126 rows, no duplicates)
 - When multiple participants give different answers, they are joined with ` | `
