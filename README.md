@@ -2,11 +2,19 @@
 
 Reads a SARI survey Excel export (Answers + Scores sheets) and produces a **10-sheet interactive workbook** with dashboard, organisation summary, section/question breakdowns, and priority analysis.
 
-## Quick Start
+## Download
 
-**No terminal needed** — double-click `run_app.command` (macOS) or `run_app.bat` (Windows). The first run sets up its own environment in about a minute; every run after that opens straight away. Python 3 must be installed once, from [python.org](https://python.org).
+**Ready-to-run builds** (no Python install needed):
 
-From a terminal instead:
+- **macOS:** [Super Filter.zip](https://github.com/dev-kir/temp_intern_filter/raw/main/Super%20Filter.zip) — download, unzip, double-click `Super Filter.app`
+- **Windows:** Run `build.sh` on a Mac to produce the `.app`, or build locally on Windows with PyInstaller:
+
+  ```bash
+  pip install pyinstaller
+  pyinstaller --windowed --onedir --name "Super Filter" --icon icon.png --add-data "report_template.xlsx:." --hidden-import=tkinterdnd2 app.py
+  ```
+
+## Quick Start (from source)
 
 ```bash
 python3 -m venv venv
@@ -15,21 +23,19 @@ source venv/bin/activate        # macOS / Linux
 pip install -r requirements.txt
 
 python app.py                   # GUI
-python super_filter.py IN.xlsx -o OUT.xlsx   # CLI
+python super_filter.py          # CLI (needs input/output paths)
 ```
 
-## How it is put together
+For the CLI, edit `INPUT_FILE` and `OUTPUT_FILE` at the top of `super_filter.py`.
 
-Two stages, deliberately separate, so the table on screen and the sheet in the file can never disagree:
+## GUI Features
 
-| | | |
-|---|---|---|
-| `compute(input)` | ~0.5 s | reads the export, returns every derived table as plain Python rows |
-| `build(input, template, output)` | ~70 s | writes those rows into `report_template.xlsx` |
-
-The GUI calls `compute()` to draw the Organisation Summary and hands the *same* result to `build()` on export. Nothing is calculated twice.
-
-`report_template.xlsx` owns all presentation — fonts, fills, column widths, page setup, the Dashboard chart and every formula. The script only replaces data and repairs the organisation dropdowns. **To change how the report looks, edit the template in Excel, not the Python.**
+- **Drag & drop** an `.xlsx` file onto the window (requires `tkinterdnd2`)
+- **Full Organisation Summary table** — scrollable, sortable by clicking any column header
+- **Search** by organisation name
+- **Colour-coded Overall score** — green (≥75%), amber (≥50%), red (<50%); all other columns stay default text colour
+- **Filter by organisation** — or "All organisations" to see everything
+- **Export Full Report** — generates the complete 10-sheet workbook
 
 ## Output Sheets
 
@@ -46,18 +52,6 @@ The GUI calls `compute()` to draw the Organisation Summary and hands the *same* 
 | 9 | **Raw Answers** | Raw data with Standard section (BM→EN merged), email excluded |
 | 10 | **Priority Detail** | Priority-ranked questions per org (hidden, drives formulas) |
 
-## GUI Features
-
-- **Drag and drop** a `.xlsx` onto the window, or click the drop zone to browse
-- **Organisation Summary table** — sortable by clicking any heading
-- **Organisation dropdown** — jump to one organisation
-- **Search** — free-text filter on organisation name
-- **Export** — writes the full 10-sheet workbook on a background thread, with progress, so the window stays responsive
-
-The table shows the 11 columns worth scanning, sized to fit the window so there is no sideways scrolling. The remaining seven — Departments represented, Role levels represented, Latest submission, Average consensus, Questions for review, Interpretation, Distance to next tier — are in the exported workbook.
-
-Text is the default colour in every column, matching the workbook where only *Overall score* carries a colour scale. Tkinter's table colours whole rows and never single cells, so a faint alternating row wash does the readability job instead.
-
 ## Maturity Tiers
 
 | Overall Score | Tier |
@@ -68,168 +62,26 @@ Text is the default colour in every column, matching the workbook where only *Ov
 | 0.6 – 0.8 | AI Leader - 3 |
 | 0.8 – 1.0 | AI Pioneer - 4 |
 
-## BM→EN Merge
-
-Bahasa Malaysia sections are mapped to English via Question ID prefix:
-
-| BM Section | → | EN Section |
-|---|---|---|
-| Latar Belakang | → | Background |
-| Strategi & Kepimpinan | → | Strategy & Leadership |
-| Bakat & Budaya Organisasi | → | Talent & Organisational Culture |
-| Pengurusan Data & Kesiapsiagaan | → | Data Management & Readiness |
-| Infrastruktur & Teknologi | → | Infrastructure & Technology |
-| Tadbir Urus, Dasar & Etika | → | Governance, Policy & Ethics |
-| Pelaburan | → | Investment |
-| Pelaksanaan AI & Impak | → | AI Implementation & Potential Impact |
-
----
-
-# Building a standalone app
-
-For users who should not have to install Python at all.
-
-## Just send someone the app
-
-Point them at **[Releases](https://github.com/dev-kir/temp_intern_filter/releases)**. Every `v*` tag builds both platforms automatically and attaches them:
-
-| They use | They download | They run |
-|---|---|---|
-| Windows | `SuperFilter-windows.zip` | unzip, then `SuperFilter.exe` |
-| macOS | `SuperFilter-macos.zip` | unzip, right-click `Super Filter.app` → *Open* |
-
-**Unzip the whole folder before running.** The executable needs its libraries and `report_template.xlsx` beside it; the bare `.exe` on its own will not work.
-
-To cut a new one:
-
-```bash
-git tag v1.0.0
-git push origin v1.0.0
-```
-
-## The one rule
-
-**A build only ever produces an app for the machine it was built on.** PyInstaller does not cross-compile. A Mac makes a `.app`; a Windows PC makes a `.exe`; neither can make the other. One codebase, two builds.
-
-| Build machine | Command | You get |
-|---|---|---|
-| Windows | `pyinstaller app.spec --noconfirm` | `dist\SuperFilter\SuperFilter.exe` |
-| macOS | `pyinstaller app.spec --noconfirm` | `dist/Super Filter.app` |
-
-If you have no Windows machine, use the GitHub Actions recipe further down — it builds the `.exe` on a free Windows runner.
-
-## Creating the `.exe` on Windows
-
-```bat
-git clone https://github.com/dev-kir/temp_intern_filter.git
-cd temp_intern_filter
-
-py -3 -m venv venv
-venv\Scripts\python -m pip install --upgrade pip
-venv\Scripts\python -m pip install -r requirements.txt pyinstaller
-
-venv\Scripts\pyinstaller app.spec --noconfirm
-```
-
-The result is the folder `dist\SuperFilter\`. Inside it, `SuperFilter.exe` is what people double-click.
-
-**Ship the whole folder, not just the .exe.** The `.exe` needs the DLLs and `report_template.xlsx` sitting next to it. Zip `dist\SuperFilter\` and send that.
-
-### What `app.spec` is doing, and why it matters
-
-```python
-datas = [('report_template.xlsx', '.')]     # ← without this, export fails at runtime
-hiddenimports = ['super_filter']
-```
-
-`report_template.xlsx` is data, not code, so PyInstaller cannot discover it by following imports. Leave that line out and the app builds perfectly, launches perfectly, and then throws `FileNotFoundError` the moment someone clicks Export. `super_filter.resource_path()` looks in `sys._MEIPASS` first for exactly this reason.
-
-The spec uses **onedir**, not `--onefile`. A onefile build unpacks ~25 MB to a temp directory on every launch, which looks like the app is hanging. A folder starts instantly.
-
-Do **not** pass `--icon icon.svg`. PyInstaller needs `.ico` on Windows and `.icns` on macOS; an SVG makes the build fail. Convert it first, then set `icon=` in `app.spec`.
-
-### First-run warning
-
-The build is unsigned, so:
-
-- **Windows** — SmartScreen says "Windows protected your PC". Click *More info* → *Run anyway*.
-- **macOS** — Gatekeeper refuses a plain double-click. Right-click the app → *Open* → *Open*. Once only.
-
-Signing removes this and costs money (an Authenticode certificate on Windows, an Apple Developer account on macOS). Not worth it for an internal tool.
-
-## Creating the `.exe` without a Windows machine
-
-Commit this as `.github/workflows/build.yml`. Push a tag like `v1.0.0` and GitHub builds both halves and attaches them to a release.
-
-```yaml
-name: build
-
-on:
-  push:
-    tags: ['v*']
-  workflow_dispatch:
-
-jobs:
-  build:
-    strategy:
-      matrix:
-        include:
-          - os: windows-latest
-            artifact: SuperFilter-windows
-          - os: macos-latest
-            artifact: SuperFilter-macos
-    runs-on: ${{ matrix.os }}
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
-        with:
-          python-version: '3.12'
-      - run: pip install -r requirements.txt pyinstaller
-      - run: pyinstaller app.spec --noconfirm
-      - uses: actions/upload-artifact@v4
-        with:
-          name: ${{ matrix.artifact }}
-          path: dist/
-```
-
-Free for public repositories. The Windows `.exe` appears under the workflow run's Artifacts.
-
-## Which option to choose
-
-| | Folder + launcher | Built app | 
-|---|---|---|
-| Ready now | yes | one build away |
-| User installs Python | yes, once | no |
-| You can produce it on a Mac | both halves | Mac half only |
-| Maintenance | none | rebuild per release |
-
-Start with the launchers. Build real apps only when the tool leaves the people who wrote it.
-
----
-
 ## Requirements
 
 - Python 3.8+
-- `openpyxl` — reading and writing workbooks
-- `tkinterdnd2` — drag-and-drop; **optional**, the app falls back to click-to-browse without it
-
-pandas is no longer used.
+- openpyxl, pandas, tkinterdnd2 (for drag-drop)
 
 ## Project Structure
 
 ```
 ammar_super_filter/
-├── super_filter.py           # compute() + build() — all the logic
-├── app.py                    # Tkinter GUI
-├── app.spec                  # PyInstaller build recipe
-├── report_template.xlsx      # presentation layer — styling, charts, formulas
-├── run_app.command           # macOS double-click launcher
-├── run_app.bat               # Windows double-click launcher
-├── icon.svg                  # app icon (convert to .ico/.icns to use in a build)
+├── super_filter.py           # CLI — generates 10-sheet workbook
+├── app.py                    # GUI — organisation summary viewer
+├── report_template.xlsx      # Excel template (presentation layer)
+├── icon.svg                  # App icon (vector)
+├── icon.png                  # App icon (raster, used by PyInstaller)
+├── build.sh                  # Build standalone .app
 ├── requirements.txt
 ├── README.md
-├── ALGORITHM.md              # full algorithm docs
-└── Super_Filter.md           # original design brief
+├── Super Filter.zip          # Built macOS app (download & run)
+├── Super Filter.app/         # Built macOS app (unzipped)
+├── venv/
+├── SARI_Results_*.xlsx       # Input files
+└── SARI_Organisation.xlsx    # Output file
 ```
-
-Survey exports and generated workbooks are **not** committed. They contain respondent names and job titles; keep them out of the repository.
