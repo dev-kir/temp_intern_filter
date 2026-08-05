@@ -635,6 +635,15 @@ def build(df, odf, sdf, qdf, ddf, cfg, out):
     ch.y_axis.title = "Normalised score"
     ch.x_axis.title = "Section"
     ch.y_axis.numFmt = "0.0%"
+    # For a HORIZONTAL bar chart the category axis sits left and the value axis
+    # sits bottom. openpyxl leaves both at "l", which is invalid OOXML: Excel
+    # refuses the file and offers to "recover" it, silently dropping the chart
+    # and some formatting on the way. LibreOffice accepts it, so this only shows
+    # up in Excel. Set both explicitly.
+    ch.x_axis.axPos = "l"
+    ch.y_axis.axPos = "b"
+    ch.x_axis.delete = False
+    ch.y_axis.delete = False
     for idx, color in enumerate(CHART_COLORS[:len(sections)]):
         pt = DataPoint(idx=idx)
         pt.graphicalProperties.solidFill = color
