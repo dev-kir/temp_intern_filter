@@ -88,6 +88,7 @@ OUTPUT_COLUMNS = [
 ]
 
 # ── Section ordering (defines the left-to-right order of question columns) ─
+# Only English sections — BM answers are merged into their EN counterparts.
 SECTION_ORDER = [
     "Background",
     "Strategy & Leadership",
@@ -97,15 +98,19 @@ SECTION_ORDER = [
     "Governance, Policy & Ethics",
     "Investment",
     "AI Implementation & Potential Impact",
-    "Latar Belakang",
-    "Strategi & Kepimpinan",
-    "Bakat & Budaya Organisasi",
-    "Pengurusan Data & Kesiapsiagaan",
-    "Infrastruktur & Teknologi",
-    "Tadbir Urus, Dasar & Etika",
-    "Pelaburan",
-    "Pelaksanaan AI & Impak",
 ]
+
+# ── BM → EN section mapping (merge BM answers into EN columns) ─
+BM_TO_EN_SECTION = {
+    "Latar Belakang":                  "Background",
+    "Strategi & Kepimpinan":           "Strategy & Leadership",
+    "Bakat & Budaya Organisasi":       "Talent & Organisational Culture",
+    "Pengurusan Data & Kesiapsiagaan": "Data Management & Readiness",
+    "Infrastruktur & Teknologi":       "Infrastructure & Technology",
+    "Tadbir Urus, Dasar & Etika":      "Governance, Policy & Ethics",
+    "Pelaburan":                       "Investment",
+    "Pelaksanaan AI & Impak":          "AI Implementation & Potential Impact",
+}
 
 # ── Scorecard: which sections to include (English only by default) ──
 # Comment out sections you don't want in the scorecard.
@@ -143,12 +148,16 @@ def read_raw_data(filepath: str) -> list[dict]:
 
 
 def build_question_order(rows: list[dict]) -> list[tuple]:
-    """Return ordered list of (section, question_id, question_num, question_text)."""
+    """Return ordered list of (section, question_id, question_num, question_text).
+    Only includes English sections — BM answers are merged into EN columns."""
     seen = set()
     questions = []
 
     for row in rows:
         sec = row["section"]
+        # Only collect from English sections (BM sections are merged)
+        if sec not in SECTION_ORDER:
+            continue
         qid = row["question_id"]
         key = (sec, qid)
         if key not in seen:
@@ -207,9 +216,12 @@ def build_org_data(rows: list[dict]) -> dict:
         sec = row["section"]
         qid = row["question_id"]
 
+        # Merge BM sections into their EN counterparts
+        en_sec = BM_TO_EN_SECTION.get(sec, sec)
+
         content = row.get(QUESTION_CELL_CONTENT, "")
         if content:
-            o["answers"][(sec, qid)].add(content)
+            o["answers"][(en_sec, qid)].add(content)
 
         score_str = row.get("answer_score", "")
         max_str = row.get("max_score", "")
@@ -217,7 +229,7 @@ def build_org_data(rows: list[dict]) -> dict:
             try:
                 score = float(score_str)
                 max_s = float(max_str) if max_str else 4.0
-                o["scores"][(sec, qid)].append((score, max_s))
+                o["scores"][(en_sec, qid)].append((score, max_s))
             except ValueError:
                 pass
 
