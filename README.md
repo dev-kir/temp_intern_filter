@@ -2,19 +2,74 @@
 
 A Python script that reads the raw SARI survey Excel export and produces a clean, grouped output where each row represents one **organisation × section × question × answer**.
 
-## Quick Start
+## Setup & Run
+
+### First time (on any laptop)
 
 ```bash
-# 1. Install dependencies
+# 1. Create virtual environment
+python3 -m venv venv
+
+# 2. Activate it
+source venv/bin/activate        # macOS / Linux
+# venv\Scripts\activate         # Windows
+
+# 3. Install dependencies
 pip install -r requirements.txt
 
-# 2. Place your Excel file in the same folder (or update INPUT_FILE in the script)
-
-# 3. Run
+# 4. Run the script
 python super_filter.py
 ```
 
+### Subsequent runs
+
+```bash
+source venv/bin/activate        # activate the venv
+python super_filter.py          # run
+```
+
 The output file `SARI_Results_Processed.xlsx` will appear in the same folder.
+
+## How to Verify & Validate the Output
+
+After running the script, open `SARI_Results_Processed.xlsx` and check these things:
+
+### 1. Row count
+The output should have the **same number of data rows** as the input (6,771 rows). This confirms no data was lost.
+
+### 2. Org-level fields are consistent
+Pick any organisation — scroll down its rows. Columns like **Organisation Type**, **Organisation Size**, **PDCS Sector**, **District** should be **identical** on every row for that org. If you see two different values for the same org, something is wrong.
+
+### 3. Multi-value fields are aggregated
+Columns like **Role Level**, **Department**, **Age Band**, **Job Title** should show all unique values joined with ` | `. For example, if an org has 5 participants with different job titles, you should see all 5 titles in one cell separated by ` | `.
+
+### 4. Multi-participant answers are preserved
+When multiple people from the same org answer the same question differently, **each unique answer gets its own row**. For example, if 5 people from "Borneo Development Corporation" answered `background_1` with 5 different answers, you should see 5 rows for that org + question — one per unique answer.
+
+### 5. Column exclusion works
+Open `super_filter.py`, comment out any line in the `OUTPUT_COLUMNS` list (add `#` at the start), re-run, and verify that column is gone from the output.
+
+### 6. Quick sanity check (Python one-liner)
+```bash
+source venv/bin/activate
+python3 -c "
+import openpyxl
+wb = openpyxl.load_workbook('SARI_Results_Processed.xlsx')
+ws = wb.active
+print('Headers:', [c.value for c in ws[1]])
+print('Data rows:', ws.max_row - 1)
+# Check org-level consistency
+orgs = {}
+for r in range(2, ws.max_row + 1):
+    name = ws.cell(r, 1).value
+    otype = ws.cell(r, 3).value
+    if name not in orgs:
+        orgs[name] = otype
+    elif orgs[name] != otype:
+        print(f'INCONSISTENT: {name} has both {orgs[name]} and {otype}')
+print(f'Checked {len(orgs)} orgs for type consistency')
+"
+```
 
 ## How It Works
 
@@ -104,11 +159,13 @@ OUTPUT_COLUMNS = [
 ```
 ammar_super_filter/
 ├── super_filter.py                          # Main processing script
-├── requirements.txt                         # Python dependencies
+├── requirements.txt                         # Python dependencies (pinned versions)
 ├── README.md                                # This file
 ├── Super_Filter.md                          # Original design brief
+├── .gitignore                               # Ignore venv, cache, output files
+├── venv/                                    # Virtual environment (not in git)
 ├── SARI_Results_2026-08-05-01-54-15.xlsx    # Input file (raw survey export)
-└── SARI_Results_Processed.xlsx              # Output file (generated)
+└── SARI_Results_Processed.xlsx              # Output file (generated, not in git)
 ```
 
 ## Future Roadmap

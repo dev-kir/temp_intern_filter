@@ -1,0 +1,5 @@
+venv/
+__pycache__/
+*.pyc
+SARI_Results_Processed.xlsx
+.DS_Store
