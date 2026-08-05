@@ -273,23 +273,20 @@ def apply_data_style(ws, start_row, end_row, num_cols):
 
 
 def auto_fit_cols(ws, num_cols, org_col_count=0, max_sample=200):
-    """Auto-fit column widths. Org columns get wider max; question columns get narrower."""
+    """Set column widths. Org columns moderate; question columns narrow with wrap."""
     for col_idx in range(1, num_cols + 1):
         header_len = len(str(ws.cell(row=1, column=col_idx).value or ""))
         header2_len = len(str(ws.cell(row=2, column=col_idx).value or ""))
         max_width = max(header_len, header2_len)
 
-        # Sample data rows for content width
         for r in range(3, min(ws.max_row + 1, max_sample + 3)):
             cell_val = str(ws.cell(row=r, column=col_idx).value or "")
-            # Cap per-cell contribution to avoid one huge cell blowing up the column
-            max_width = max(max_width, min(len(cell_val), 60))
+            max_width = max(max_width, min(len(cell_val), 40))
 
-        # Different max widths for org columns vs question columns
         if col_idx <= org_col_count:
-            max_allowed = 40  # org columns can be wider
+            max_allowed = 30
         else:
-            max_allowed = 28  # question columns stay narrow, text wraps
+            max_allowed = 18
 
         ws.column_dimensions[get_column_letter(col_idx)].width = min(max_width + 2, max_allowed)
 
@@ -384,8 +381,7 @@ def write_pivot_sheet(wb, orgs: dict, questions: list[tuple]):
         row_num += 1
 
     apply_data_style(ws, 3, row_num - 1, total_cols)
-    # Freeze only the org name column + header rows so user can scroll through questions
-    ws.freeze_panes = "B3"
+    # No freeze panes — full scroll in all directions
     ws.auto_filter.ref = f"A2:{get_column_letter(total_cols)}{row_num - 1}"
     auto_fit_cols(ws, total_cols, org_col_count)
 
@@ -509,8 +505,8 @@ def write_scorecard_sheet(wb, orgs: dict, questions: list[tuple]):
         ),
     )
 
-    # Freeze only org name column + header so user can scroll through sections
-    ws.freeze_panes = "B2"
+    # Freeze only header row, no columns frozen — full horizontal scroll
+    ws.freeze_panes = "A2"
     ws.auto_filter.ref = f"A1:{get_column_letter(total_cols)}{row_num - 1}"
     auto_fit_cols(ws, total_cols, len(OUTPUT_COLUMNS))
 
