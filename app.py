@@ -1,16 +1,15 @@
 """
 Super Filter — Desktop GUI
-==========================
-Drop in a raw SARI survey export, read the Organisation Summary on screen, then
-export the complete formatted workbook.
+============================
+Drop in a raw SARI survey export, read the Organisation Summary on screen,
+then export the complete formatted workbook.
 
-The table shown here is not recalculated by this file. It is exactly the
-`Organisation Summary` that super_filter.compute() produces and that
-super_filter.build() writes into the workbook, so the screen and the file
-cannot drift apart.
+The table on screen is built with a plain Frame/Label grid instead of a ttk
+Treeview so that the Overall score cell can be colour-coded independently.
+Everything else stays default text colour, matching the workbook.
 
 Run:
-    python app.py            (or double-click run_app.command / run_app.bat)
+    python app.py
 """
 
 import sys
@@ -39,49 +38,147 @@ WHITE = "#FFFFFF"
 DROPZONE = "#F7F9FC"
 TEXT = "#1F1F1F"
 GREY = "#6E6E6E"
-LINE = "#DDE3EA"      # the only divider in the window, under the column headings
-STRIPE = "#F7F9FB"    # alternating row wash, quiet enough not to read as a band
+LINE = "#DDE3EA"
+STRIPE = "#F7F9FB"
+GREEN = "#4CAF50"
+AMBER = "#F4B400"
+RED = "#DB4437"
 
 ALL_ORGS = "All organisations"
 
-# The on-screen table shows what is worth scanning and nothing more, so it fits the
-# window without sideways scrolling. Every one of the 18 fields is still written to
-# the exported workbook — this list only governs the display.
-#
-# label, index in sf.ORG_HEADERS, width, formatter, anchor, stretch
+# Display columns only. Every field is still written to the exported workbook.
+# (label, index in sf.ORG_HEADERS, width in px, anchor)
 COLUMNS = [
-    ("Organisation name",   0, 280, str,   tk.W,      True),
-    ("Type",                1, 140, str,   tk.W,      True),
-    ("Resp",                2,  52, "int", tk.CENTER, False),
-    ("Size",                5,  72, str,   tk.CENTER, False),
-    ("Sector",              6, 120, str,   tk.W,      True),
-    ("Avg score",           8,  70, "f2",  tk.CENTER, False),
-    ("Overall",             9,  76, "pct", tk.CENTER, False),
-    ("Strongest section",  10, 140, str,   tk.W,      True),
-    ("Weakest section",    11, 140, str,   tk.W,      True),
-    ("Agreement",          14,  86, str,   tk.CENTER, False),
-    ("Maturity tier",      16, 112, str,   tk.W,      False),
+    ("Organisation name",   0, 280, tk.W),
+    ("Type",                1, 140, tk.W),
+    ("Resp",                2,  52, tk.CENTER),
+    ("Size",                5,  72, tk.CENTER),
+    ("Sector",              6, 120, tk.W),
+    ("Avg score",           8,  70, tk.CENTER),
+    ("Overall",             9,  76, tk.CENTER),
+    ("Strongest section",  10, 140, tk.W),
+    ("Weakest section",    11, 140, tk.W),
+    ("Agreement",          14,  86, tk.CENTER),
+    ("Maturity tier",      16, 112, tk.W),
 ]
-
-# Shown only in the exported workbook: Departments represented, Role levels
-# represented, Latest submission, Average consensus, Questions for review,
-# Interpretation, Distance to next tier.
+OVERALL_COL = 6       # index in COLUMNS for the Overall column
+RAW_OVERALL_IDX = 9  # index in sf.ORG_HEADERS for the Overall score value
 
 
-def fmt(value, kind):
+def fmt(value, idx):
     if value is None or value == "":
         return "-"
-    try:
-        if kind == "int":
+    if idx == 2:              # Respondents
+        try:
             return str(int(value))
-        if kind == "f2":
+        except (TypeError, ValueError):
+            return str(value)
+    if idx == 8:              # Avg score
+        try:
             return f"{float(value):.2f}"
-        if kind == "pct":
+        except (TypeError, ValueError):
+            return str(value)
+    if idx == 9:              # Overall
+        try:
             return f"{float(value):.1%}"
-    except (TypeError, ValueError):
-        return str(value)
+        except (TypeError, ValueError):
+            return str(value)
     return str(value)
 
+
+def score_color(value):
+    """Colour for the Overall score cell. Default text colour elsewhere."""
+    try:
+        v = float(value)
+    except (TypeError, ValueError):
+        return None
+    if v >= 0.75: return GREEN
+    if v >= 0.50: return AMBER
+    return RED
+
+
+# ───────────────────────────────────────────────────────────────────────
+#  Custom grid table
+# ───────────────────────────────────────────────────────────────────────
+
+class GridTable:
+    """
+    Plain Frame of GridRow children. Each row is a Frame of fixed-width
+    Label cells. Entire table lives inside a Canvas so a long list scrolls
+    vertically without distorting the column widths.
+    """
+
+    def __init__(self, parent, columns, on_click=None):
+        self.columns = columns
+        self.on_click = on_click
+        self.rows = []            # list of (row_data, frame, label_widgets)
+
+        outer = tk.Frame(parent, bg=WHITE)
+        outer.pack(fill=tk.BOTH, expand=True)
+
+        # Header row
+        header = tk.Frame(outer, bg=WHITE)
+        header.pack(fill=tk.X)
+        self._draw_header(header)
+
+        # Hairline divider under the header (the only one in the table)
+        tk.Frame(outer, bg=LINE, height=1).pack(fill=tk.X)
+
+        # Scrollable body
+        self.canvas = tk.Canvas(outer, bg=WHITE, highlightthickness=0, bd=0)
+        vsb = ttk.Scrollbar(outer, orient=tk.VERTICAL, command=self.canvas.yview)
+        self.canvas.configure(yscrollcommand=vsb.set)
+        self.canvas.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+        vsb.pack(side=tk.RIGHT, fill=tk.Y)
+
+        self.body = tk.Frame(self.canvas, bg=WHITE)
+        self.body_id = self.canvas.create_window((0, 0), window=self.body, anchor="nw")
+        self.body.bind("<Configure>", lambda e: self.canvas.configure(scrollregion=self.canvas.bbox("all")))
+        self.canvas.bind("<Configure>", self._resize_body)
+
+    def _resize_body(self, event):
+        # Make the inner frame match the canvas width so the scrolling region is right
+        self.canvas.itemconfigure(self.body_id, width=event.width)
+
+    def _draw_header(self, frame):
+        for i, (label, idx, width, anchor) in enumerate(self.columns):
+            lbl = tk.Label(frame, text=label, font=("Calibri", 10, "bold"),
+                           bg=WHITE, fg=GREY, anchor=anchor, padx=8, pady=8)
+            lbl.grid(row=0, column=i, sticky="w" if anchor == tk.W else "e", padx=4)
+            # Mousewheel sort header
+            if self.on_click:
+                lbl.bind("<Button-1>", lambda e, c=idx, l=label: self.on_click(c, l))
+                lbl.configure(cursor="hand2")
+
+    def set_rows(self, rows_data):
+        for w in self.body.winfo_children():
+            w.destroy()
+        self.rows = []
+        for r, row in enumerate(rows_data):
+            bg = STRIPE if r % 2 else WHITE
+            rowframe = tk.Frame(self.body, bg=bg)
+            rowframe.pack(fill=tk.X)
+            label_widgets = []
+            for i, (label, idx, width, anchor) in enumerate(self.columns):
+                text = fmt(row[idx], idx)
+                fg = TEXT
+                font = ("Calibri", 11)
+                if i == OVERALL_COL:
+                    col = score_color(row[RAW_OVERALL_IDX])
+                    if col is not None:
+                        fg = col
+                        font = ("Calibri", 11, "bold")
+                cell = tk.Label(rowframe, text=text, font=font, bg=bg, fg=fg,
+                                anchor=anchor, padx=8, pady=6)
+                cell.grid(row=0, column=i, sticky="we", padx=4)
+                label_widgets.append(cell)
+                rowframe.grid_columnconfigure(i, weight=1 if anchor == tk.W else 0, minsize=width)
+            self.rows.append((row, rowframe, label_widgets))
+
+
+# ───────────────────────────────────────────────────────────────────────
+#  App
+# ───────────────────────────────────────────────────────────────────────
 
 class SuperFilterApp:
     def __init__(self, root):
@@ -91,43 +188,57 @@ class SuperFilterApp:
         self.root.minsize(900, 500)
         self.root.configure(bg=WHITE)
 
-        self.data = None          # whatever compute() returned
-        self.rows = []            # sf.ORG_HEADERS-shaped rows, current sort order
+        self.data = None
+        self.rows = []
         self.filepath = None
         self.sort_idx = None
         self.sort_asc = True
         self.busy = False
+        self.table = None
 
-        self._build_ui()
+        # Everything lives in ONE scrollable surface so the title and toolbar
+        # scroll with the table — no fixed top bar.
+        outer = tk.Frame(self.root, bg=WHITE)
+        outer.pack(fill=tk.BOTH, expand=True)
 
-    # ── layout ────────────────────────────────────────────────────────────
-    def _build_ui(self):
-        bar = tk.Frame(self.root, bg=NAVY, height=52)
-        bar.pack(fill=tk.X)
-        bar.pack_propagate(False)
-        tk.Label(bar, text="Organisation Summary", font=("Calibri", 16, "bold"),
-                 fg=WHITE, bg=NAVY).pack(side=tk.LEFT, padx=20)
-        self.status_lbl = tk.Label(bar, text="No file loaded", font=("Calibri", 10),
-                                   fg="#AABBCC", bg=NAVY)
-        self.status_lbl.pack(side=tk.RIGHT, padx=20)
+        self.canvas = tk.Canvas(outer, bg=WHITE, highlightthickness=0, bd=0)
+        vsb = ttk.Scrollbar(outer, orient=tk.VERTICAL, command=self.canvas.yview)
+        self.canvas.configure(yscrollcommand=vsb.set)
+        self.canvas.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+        vsb.pack(side=tk.RIGHT, fill=tk.Y)
 
-        # The toolbar shares the table's background so the window reads as one
-        # surface rather than a stack of separate grey strips.
-        tb = tk.Frame(self.root, bg=WHITE, height=48)
-        tb.pack(fill=tk.X)
-        tb.pack_propagate(False)
+        self.body = tk.Frame(self.canvas, bg=WHITE)
+        self.body_id = self.canvas.create_window((0, 0), window=self.body, anchor="nw")
+        self.body.bind("<Configure>", lambda e: self.canvas.configure(scrollregion=self.canvas.bbox("all")))
+        self.canvas.bind("<Configure>", lambda e: self.canvas.itemconfigure(self.body_id, width=e.width))
+
+        # Title — scrolls with the content
+        tk.Label(self.body, text="Organisation Summary", font=("Calibri", 18, "bold"),
+                 bg=WHITE, fg=NAVY, anchor=tk.W).pack(fill=tk.X, padx=14, pady=(14, 0))
+
+        # Toolbar — scrolls with the content
+        self._build_toolbar()
+
+        # Main content area
+        self.main = tk.Frame(self.body, bg=WHITE)
+        self.main.pack(fill=tk.BOTH, expand=True, padx=14, pady=(10, 14))
+        self._show_dropzone()
+
+    def _build_toolbar(self):
+        tb = tk.Frame(self.body, bg=WHITE)
+        tb.pack(fill=tk.X, padx=14, pady=(10, 0))
 
         tk.Button(tb, text="Open Excel...", command=self._choose_file,
                   font=("Calibri", 10), bg=WHITE, relief=tk.FLAT,
                   highlightthickness=1, highlightbackground=LINE,
-                  padx=14, pady=4, cursor="hand2").pack(side=tk.LEFT, padx=(14, 0), pady=9)
+                  padx=14, pady=4, cursor="hand2").pack(side=tk.LEFT, pady=4)
 
         tk.Label(tb, text="Organisation:", font=("Calibri", 10, "bold"),
                  bg=WHITE, fg=TEXT).pack(side=tk.LEFT, padx=(18, 6))
         self.org_var = tk.StringVar(value=ALL_ORGS)
         self.org_combo = ttk.Combobox(tb, textvariable=self.org_var, state="readonly",
-                                      font=("Calibri", 10), width=38, values=[ALL_ORGS])
-        self.org_combo.pack(side=tk.LEFT, pady=6)
+                                       font=("Calibri", 10), width=38, values=[ALL_ORGS])
+        self.org_combo.pack(side=tk.LEFT, pady=4)
         self.org_combo.bind("<<ComboboxSelected>>", lambda e: self._refresh())
 
         tk.Label(tb, text="Search:", font=("Calibri", 10, "bold"),
@@ -136,17 +247,18 @@ class SuperFilterApp:
         self.search_var.trace_add("write", lambda *a: self._refresh())
         tk.Entry(tb, textvariable=self.search_var, font=("Calibri", 10),
                  relief=tk.FLAT, highlightthickness=1, highlightbackground=LINE,
-                 width=22).pack(side=tk.LEFT, pady=9)
+                 width=22).pack(side=tk.LEFT, pady=4)
 
         self.export_btn = tk.Button(tb, text="Export Full Report", command=self._export,
                                     font=("Calibri", 10, "bold"), bg=HEADER_BG, fg=WHITE,
                                     activebackground=NAVY, activeforeground=WHITE,
                                     relief=tk.FLAT, padx=14, pady=4, cursor="hand2")
-        self.export_btn.pack(side=tk.RIGHT, padx=(0, 14), pady=9)
+        self.export_btn.pack(side=tk.RIGHT, pady=4)
 
-        self.main = tk.Frame(self.root, bg=WHITE)
-        self.main.pack(fill=tk.BOTH, expand=True, padx=14, pady=(0, 10))
-        self._show_dropzone()
+        # Status line — moves with the toolbar
+        self.status_lbl = tk.Label(self.body, text="No file loaded", font=("Calibri", 9),
+                                   bg=WHITE, fg=GREY, anchor=tk.W)
+        self.status_lbl.pack(fill=tk.X, padx=14, pady=(4, 0))
 
     def _show_dropzone(self):
         for w in self.main.winfo_children():
@@ -222,79 +334,37 @@ class SuperFilterApp:
         for w in self.main.winfo_children():
             w.destroy()
 
-        frame = tk.Frame(self.main, bg=WHITE)
-        frame.pack(fill=tk.BOTH, expand=True)
+        wrap = tk.Frame(self.main, bg=WHITE)
+        wrap.pack(fill=tk.BOTH, expand=True)
 
-        labels = [c[0] for c in COLUMNS]
-        style = ttk.Style()
-        style.theme_use("clam")          # the only theme that honours these colours on macOS
-        style.configure("Summary.Treeview",
-                        background=WHITE, fieldbackground=WHITE, foreground=TEXT,
-                        rowheight=26, font=("Calibri", 11),
-                        borderwidth=0, relief=tk.FLAT)
-        # Headings sit on the same white as the rows, separated by one hairline only,
-        # so the header does not read as a panel bolted on top of the body.
-        style.configure("Summary.Treeview.Heading",
-                        background=WHITE, foreground=GREY,
-                        font=("Calibri", 10, "bold"),
-                        relief=tk.FLAT, borderwidth=0, padding=(6, 8))
-        style.map("Summary.Treeview.Heading", background=[("active", STRIPE)])
-        style.map("Summary.Treeview",
-                  background=[("selected", "#DCE7F5")],
-                  foreground=[("selected", TEXT)])
-        style.layout("Summary.Treeview", [
-            ("Summary.Treeview.treearea", {"sticky": "nswe"})])
-
-        # No horizontal scrollbar: the columns above are sized to fit the window.
-        self.tree = ttk.Treeview(frame, columns=labels, show="headings",
-                                 style="Summary.Treeview", selectmode="browse")
-        vsb = ttk.Scrollbar(frame, orient=tk.VERTICAL, command=self.tree.yview)
-        self.tree.configure(yscrollcommand=vsb.set)
-
-        self.tree.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
-        vsb.pack(side=tk.RIGHT, fill=tk.Y)
-
-        for label, idx, width, _, anchor, stretch in COLUMNS:
-            self.tree.heading(label, text=label, anchor=anchor,
-                              command=lambda i=idx: self._sort_by(i))
-            self.tree.column(label, width=width, minwidth=44,
-                             anchor=anchor, stretch=stretch)
-
-        # Text stays the default colour in every column, matching the workbook, where
-        # only Overall score carries a colour scale. Tkinter's table colours whole rows
-        # and never single cells, so an alternating wash carries readability instead.
-        self.tree.tag_configure("odd", background=STRIPE)
-
-        tk.Frame(self.main, bg=LINE, height=1).pack(fill=tk.X)
-        self.count_lbl = tk.Label(self.main, text="", font=("Calibri", 9),
-                                  bg=WHITE, fg=GREY, anchor=tk.W)
-        self.count_lbl.pack(fill=tk.X, pady=(6, 0))
-
+        self.table = GridTable(wrap, COLUMNS, on_click=self._sort_by)
         self._refresh()
 
-    def _refresh(self):
-        if self.data is None or not hasattr(self, "tree"):
-            return
-        self.tree.delete(*self.tree.get_children())
+        self.count_lbl = tk.Label(self.main, text="", font=("Calibri", 9),
+                                   bg=WHITE, fg=GREY, anchor=tk.W)
+        self.count_lbl.pack(fill=tk.X, pady=(6, 0))
 
+    def _refresh(self):
+        if self.data is None or self.table is None:
+            return
         picked = self.org_var.get()
         search = self.search_var.get().strip().lower()
 
         shown = 0
+        rows = []
         for row in self.rows:
             name = str(row[0])
             if picked != ALL_ORGS and name != picked:
                 continue
             if search and search not in name.lower():
                 continue
-            values = tuple(fmt(row[idx], kind) for _, idx, _, kind, _, _ in COLUMNS)
-            self.tree.insert("", tk.END, values=values,
-                             tags=("odd",) if shown % 2 else ())
+            rows.append(row)
             shown += 1
 
+        self.table.set_rows(rows)
         self.count_lbl.config(text=f"Showing {shown} of {len(self.rows)} organisations")
 
-    def _sort_by(self, idx):
+    def _sort_by(self, idx, label):
         self.sort_asc = not self.sort_asc if self.sort_idx == idx else False
         self.sort_idx = idx
 
@@ -367,7 +437,8 @@ class SuperFilterApp:
 def main():
     root = TkinterDnD.Tk() if HAS_DND else tk.Tk()
 
-    icon = Path(sf.resource_path("icon.png"))
+    # Icon (optional)
+    icon = Path(__file__).with_name("icon.png")
     if icon.exists():
         try:
             root.iconphoto(True, tk.PhotoImage(file=str(icon)))
