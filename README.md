@@ -1,9 +1,16 @@
 # Super Filter — SARI Survey Results Processor
 
-A Python script that reads the raw SARI survey Excel export and produces a **pivot table** where:
-- **Each row = one organisation** (126 rows)
-- **Each question = its own column** (74 question columns), grouped by section
+A Python script that reads the raw SARI survey Excel export and produces **3 sheets**:
+
+| Sheet | Purpose |
+|---|---|
+| **Pivot** | One row per org, 74 question columns — see what each org answered |
+| **Scorecard** | One row per org, per-section average scores + **OVERALL** — measure performance |
+| **Question Reference** | Maps question IDs to full question text |
+
+- **Each row = one organisation** (126 rows, no duplicates)
 - When multiple participants give different answers, they are joined with ` | `
+- Scorecard has **color scale** (red→yellow→green) for quick visual comparison
 
 ## Setup & Run
 
@@ -35,9 +42,9 @@ The output file `SARI_Results_Processed.xlsx` will appear in the same folder.
 
 ## Output Structure
 
-The output Excel has **two sheets**:
+The output Excel has **three sheets**:
 
-### Sheet 1: `Pivot` — The main pivot table
+### Sheet 1: `Pivot` — Text answers (what each org said)
 
 | Row | Content |
 |---|---|
@@ -51,9 +58,25 @@ The output Excel has **two sheets**:
 
 **Right side (74 columns):** One column per question, grouped by section
 - Each cell shows all unique answers from that org's participants, joined with ` | `
-- Empty cell = no participant from that org answered that question
 
-### Sheet 2: `Question Reference` — Maps question IDs to full question text
+### Sheet 2: `Scorecard` — Numerical scores (measure performance)
+
+This is the sheet to use for **evaluating whole-company performance**.
+
+| Column | Description |
+|---|---|
+| Organisation Name ... Job Title | Same org-level info as Pivot |
+| Background | Average score for Background section (0–4) |
+| Strategy & Leadership | Average score for Strategy section (0–4) |
+| ... 6 more sections ... | One column per section |
+| **OVERALL** | Average across all 8 sections — **the single number to rank orgs** |
+
+- Scores are **0–4 scale** (higher = better AI maturity)
+- Cells have **color scale**: red (low) → yellow (mid) → green (high)
+- Sort by the OVERALL column to rank organisations from best to worst
+- Empty cells = no participant from that org answered any question in that section
+
+### Sheet 3: `Question Reference` — Maps question IDs to full question text
 
 | Column | Description |
 |---|---|
@@ -137,14 +160,22 @@ Open `super_filter.py` and edit the **CONFIG** section at the top:
 INPUT_FILE = "SARI_Results_2026-08-05-01-54-15.xlsx"
 OUTPUT_FILE = "SARI_Results_Processed.xlsx"
 
-# What to display in question cells: "answer", "answer_value", or "answer_score"
+# What to display in Pivot question cells: "answer", "answer_value", or "answer_score"
 QUESTION_CELL_CONTENT = "answer"
 
-# To EXCLUDE a column, comment it out with #
+# To EXCLUDE an org-level column, comment it out with #
 OUTPUT_COLUMNS = [
     ("Organisation Name",     "organisation_name",   "single"),
     # ("Parent Company",      "parent_company",      "single"),  # ← excluded!
     ("Organisation Type",     "organisation_type",   "single"),
+    ...
+]
+
+# To EXCLUDE a section from the Scorecard, comment it out
+SCORECARD_SECTIONS = [
+    "Background",
+    "Strategy & Leadership",
+    # "Investment",           # ← excluded from scorecard!
     ...
 ]
 ```

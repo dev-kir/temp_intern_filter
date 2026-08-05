@@ -1,10 +1,11 @@
 """
-Super Filter — SARI Survey Results Processor (Pivot Edition)
-=============================================================
-Reads the raw SARI survey Excel export and produces a pivot table where:
-  - Each ROW = one organisation (126 rows)
-  - Each QUESTION becomes its own column, grouped by section
-  - When multiple participants give different answers, they are joined with " | "
+Super Filter — SARI Survey Results Processor (Pivot + Scorecard)
+==================================================================
+Reads the raw SARI survey Excel export and produces:
+
+  Sheet 1 "Pivot"      — One row per org, questions as columns (text answers)
+  Sheet 2 "Scorecard"  — One row per org, per-section average scores + overall
+  Sheet 3 "Question Ref" — Maps question IDs to full question text
 
 Usage:
     python super_filter.py
@@ -19,8 +20,9 @@ from pathlib import Path
 from collections import defaultdict
 
 import openpyxl
-from openpyxl.styles import Font, PatternFill, Alignment, Border, Side
+from openpyxl.styles import Font, PatternFill, Alignment, Border, Side, numbers
 from openpyxl.utils import get_column_letter
+from openpyxl.formatting.rule import ColorScaleRule
 
 # ═══════════════════════════════════════════════════════════════════════════
 # CONFIG — change these to suit your needs
@@ -29,7 +31,7 @@ from openpyxl.utils import get_column_letter
 INPUT_FILE = "SARI_Results_2026-08-05-01-54-15.xlsx"
 OUTPUT_FILE = "SARI_Results_Processed.xlsx"
 
-# What to display in each question cell.
+# What to display in Pivot question cells.
 # Options: "answer" (the text), "answer_value" (the code), "answer_score" (the number)
 QUESTION_CELL_CONTENT = "answer"
 
@@ -86,7 +88,6 @@ OUTPUT_COLUMNS = [
 ]
 
 # ── Section ordering (defines the left-to-right order of question columns) ─
-# Sections not listed here will appear at the end in alphabetical order.
 SECTION_ORDER = [
     "Background",
     "Strategy & Leadership",
@@ -106,8 +107,21 @@ SECTION_ORDER = [
     "Pelaksanaan AI & Impak",
 ]
 
+# ── Scorecard: which sections to include (English only by default) ──
+# Comment out sections you don't want in the scorecard.
+SCORECARD_SECTIONS = [
+    "Background",
+    "Strategy & Leadership",
+    "Talent & Organisational Culture",
+    "Data Management & Readiness",
+    "Infrastructure & Technology",
+    "Governance, Policy & Ethics",
+    "Investment",
+    "AI Implementation & Potential Impact",
+]
+
 # ═══════════════════════════════════════════════════════════════════════════
-# PROCESSING LOGIC — you shouldn't need to edit below this line
+# PROCESSING LOGIC
 # ═══════════════════════════════════════════════════════════════════════════
 
 
@@ -129,11 +143,7 @@ def read_raw_data(filepath: str) -> list[dict]:
 
 
 def build_question_order(rows: list[dict]) -> list[tuple]:
-    """
-    Determine the ordered list of (section, question_id, question_num, question_text).
-    Uses (section, question_id) as the unique key since the same qid can appear
-    in both English and BM sections.
-    """
+    """Return ordered list of (section, question_id, question_num, question_text)."""
     seen = set()
     questions = []
 
@@ -163,15 +173,17 @@ def build_org_data(rows: list[dict]) -> dict:
     """
     Group all rows by organisation_name.
     Returns: dict[org_name] -> {
-        "single": {key: value},
-        "list":   {key: set()},
-        "answers": {question_id: set of answer strings},
+        "single":  {key: value},
+        "list":    {key: set()},
+        "answers": {(section, qid): set of answer strings},
+        "scores":  {(section, qid): list of (score, max_score)},
     }
     """
     orgs: dict[str, dict] = defaultdict(lambda: {
         "single": {},
         "list": defaultdict(set),
         "answers": defaultdict(set),
+        "scores": defaultdict(list),
     })
 
     for row in rows:
@@ -181,101 +193,101 @@ def build_org_data(rows: list[dict]) -> dict:
 
         o = orgs[org]
 
-        # Single-value fields
         for key in ["organisation_name", "parent_company", "organisation_type",
                      "organisation_size", "stakeholder_category", "pcds_sector",
                      "district", "part_of_group"]:
             if key not in o["single"]:
                 o["single"][key] = row.get(key, "")
 
-        # List fields
         for key in ["role_level", "department", "age_band", "job_title"]:
             val = row.get(key, "")
             if val:
                 o["list"][key].add(val)
 
-        # Per-question answers (keyed by section + question_id)
         sec = row["section"]
         qid = row["question_id"]
+
         content = row.get(QUESTION_CELL_CONTENT, "")
         if content:
             o["answers"][(sec, qid)].add(content)
 
+        score_str = row.get("answer_score", "")
+        max_str = row.get("max_score", "")
+        if score_str:
+            try:
+                score = float(score_str)
+                max_s = float(max_str) if max_str else 4.0
+                o["scores"][(sec, qid)].append((score, max_s))
+            except ValueError:
+                pass
+
     return orgs
 
 
-def style_sheet(ws, num_cols: int, num_rows: int, section_spans: list[tuple]):
-    """Apply styling: header, section group headers, alternating rows, borders."""
-    header_font = Font(name="Calibri", bold=True, size=10, color="FFFFFF")
-    header_fill = PatternFill(start_color="2F5496", end_color="2F5496", fill_type="solid")
-    section_fill = PatternFill(start_color="4472C4", end_color="4472C4", fill_type="solid")
-    section_font = Font(name="Calibri", bold=True, size=10, color="FFFFFF")
-    light_fill = PatternFill(start_color="D6E4F0", end_color="D6E4F0", fill_type="solid")
-    thin_border = Border(
-        left=Side(style="thin"),
-        right=Side(style="thin"),
-        top=Side(style="thin"),
-        bottom=Side(style="thin"),
-    )
-    header_align = Alignment(horizontal="center", vertical="center", wrap_text=True)
-    data_align = Alignment(vertical="top", wrap_text=True)
+# ═══════════════════════════════════════════════════════════════════════════
+# STYLING HELPERS
+# ═══════════════════════════════════════════════════════════════════════════
 
-    # Row 1: Section group headers (merged cells)
-    for sec_name, start_col, end_col in section_spans:
-        if start_col == end_col:
-            cell = ws.cell(row=1, column=start_col)
-            cell.value = sec_name
-        else:
-            ws.merge_cells(start_row=1, start_column=start_col, end_row=1, end_column=end_col)
-            cell = ws.cell(row=1, column=start_col)
-            cell.value = sec_name
-        cell.font = section_font
-        cell.fill = section_fill
-        cell.alignment = header_align
-        cell.border = thin_border
-        # Apply border to all cells in the merged range
-        for c in range(start_col, end_col + 1):
-            ws.cell(row=1, column=c).border = thin_border
+HEADER_FONT = Font(name="Calibri", bold=True, size=10, color="FFFFFF")
+HEADER_FILL = PatternFill(start_color="2F5496", end_color="2F5496", fill_type="solid")
+SECTION_FILL = PatternFill(start_color="4472C4", end_color="4472C4", fill_type="solid")
+SECTION_FONT = Font(name="Calibri", bold=True, size=10, color="FFFFFF")
+LIGHT_FILL = PatternFill(start_color="D6E4F0", end_color="D6E4F0", fill_type="solid")
+THIN_BORDER = Border(
+    left=Side(style="thin"), right=Side(style="thin"),
+    top=Side(style="thin"), bottom=Side(style="thin"),
+)
+HEADER_ALIGN = Alignment(horizontal="center", vertical="center", wrap_text=True)
+DATA_ALIGN = Alignment(vertical="top", wrap_text=True)
 
-    # Row 2: Question ID headers
+
+def apply_header_style(ws, row, num_cols):
     for col in range(1, num_cols + 1):
-        cell = ws.cell(row=2, column=col)
-        cell.font = header_font
-        cell.fill = header_fill
-        cell.alignment = header_align
-        cell.border = thin_border
+        cell = ws.cell(row=row, column=col)
+        cell.font = HEADER_FONT
+        cell.fill = HEADER_FILL
+        cell.alignment = HEADER_ALIGN
+        cell.border = THIN_BORDER
 
-    # Data rows (starting row 3)
-    for r in range(3, num_rows + 3):
+
+def apply_data_style(ws, start_row, end_row, num_cols):
+    for r in range(start_row, end_row + 1):
         for c in range(1, num_cols + 1):
             cell = ws.cell(row=r, column=c)
-            cell.border = thin_border
-            cell.alignment = data_align
-            if (r - 3) % 2 == 1:
-                cell.fill = light_fill
+            cell.border = THIN_BORDER
+            cell.alignment = DATA_ALIGN
+            if (r - start_row) % 2 == 1:
+                cell.fill = LIGHT_FILL
 
 
-def write_output(orgs: dict, questions: list[tuple], output_path: str):
-    """Write the pivot table to a new Excel file."""
-    wb = openpyxl.Workbook()
+def auto_fit_cols(ws, num_cols, max_sample=200):
+    for col_idx in range(1, num_cols + 1):
+        max_width = len(str(ws.cell(row=1, column=col_idx).value or ""))
+        for r in range(2, min(ws.max_row + 1, max_sample + 2)):
+            cell_val = str(ws.cell(row=r, column=col_idx).value or "")
+            max_width = max(max_width, len(cell_val))
+        ws.column_dimensions[get_column_letter(col_idx)].width = min(max_width + 3, 50)
+
+
+# ═══════════════════════════════════════════════════════════════════════════
+# PIVOT SHEET
+# ═══════════════════════════════════════════════════════════════════════════
+
+def write_pivot_sheet(wb, orgs: dict, questions: list[tuple]):
     ws = wb.active
     ws.title = "Pivot"
 
-    # ── Build column layout ──
-    # Left side: org-level columns
     org_headers = [col[0] for col in OUTPUT_COLUMNS]
     org_col_count = len(OUTPUT_COLUMNS)
 
-    # Right side: one column per question, grouped by section
-    # section_spans: list of (section_name, start_col, end_col)
     section_spans = []
     current_section = None
     section_start = None
-    question_columns = []  # list of (section, qid, question_text)
+    question_columns = []
 
     for sec, qid, qnum, qtext in questions:
         question_columns.append((sec, qid, qtext))
-        col_idx = org_col_count + len(question_columns)  # 1-based
+        col_idx = org_col_count + len(question_columns)
 
         if sec != current_section:
             if current_section is not None:
@@ -283,23 +295,19 @@ def write_output(orgs: dict, questions: list[tuple], output_path: str):
             current_section = sec
             section_start = col_idx
 
-    # Don't forget the last section
     if current_section is not None:
         section_spans.append((current_section, section_start, org_col_count + len(question_columns)))
 
     total_cols = org_col_count + len(question_columns)
 
-    # ── Write Row 1: Section group headers ──
-    # For org-level columns, merge them into one "Organisation Info" header
+    # Row 1: Section group headers
     if org_col_count > 1:
         ws.merge_cells(start_row=1, start_column=1, end_row=1, end_column=org_col_count)
         cell = ws.cell(row=1, column=1)
         cell.value = "Organisation Info"
     elif org_col_count == 1:
-        cell = ws.cell(row=1, column=1)
-        cell.value = org_headers[0]
+        ws.cell(row=1, column=1).value = org_headers[0]
 
-    # Section headers for question columns
     for sec_name, start_col, end_col in section_spans:
         if start_col == end_col:
             cell = ws.cell(row=1, column=start_col)
@@ -308,31 +316,31 @@ def write_output(orgs: dict, questions: list[tuple], output_path: str):
             ws.merge_cells(start_row=1, start_column=start_col, end_row=1, end_column=end_col)
             cell = ws.cell(row=1, column=start_col)
             cell.value = sec_name
+        cell.font = SECTION_FONT
+        cell.fill = SECTION_FILL
+        cell.alignment = HEADER_ALIGN
+        cell.border = THIN_BORDER
+        for c in range(start_col, end_col + 1):
+            ws.cell(row=1, column=c).border = THIN_BORDER
 
-    # ── Write Row 2: Column headers ──
+    # Row 2: Column headers
     for col_idx, header in enumerate(org_headers, 1):
         ws.cell(row=2, column=col_idx, value=header)
-
     for i, (sec, qid, qtext) in enumerate(question_columns):
-        col_idx = org_col_count + i + 1
-        ws.cell(row=2, column=col_idx, value=qid)
+        ws.cell(row=2, column=org_col_count + i + 1, value=qid)
 
-    # ── Write Row 3: Question text (as a reference row, hidden by default) ──
-    # Actually, let's put question text as comments or a separate sheet.
-    # For now, Row 3+ is data.
+    apply_header_style(ws, 2, total_cols)
 
-    # ── Write data rows (starting row 3) ──
+    # Data rows (starting row 3)
     row_num = 3
     for org_name in sorted(orgs.keys()):
         o = orgs[org_name]
 
-        # Build list values
         list_values = {}
         for key in ["role_level", "department", "age_band", "job_title"]:
             vals = sorted(o["list"].get(key, set()))
             list_values[key] = " | ".join(vals) if vals else ""
 
-        # Write org-level columns
         for col_idx, (_, key, agg_type) in enumerate(OUTPUT_COLUMNS, 1):
             if agg_type == "single":
                 val = o["single"].get(key, "")
@@ -342,7 +350,6 @@ def write_output(orgs: dict, questions: list[tuple], output_path: str):
                 val = ""
             ws.cell(row=row_num, column=col_idx, value=val)
 
-        # Write question columns
         for i, (sec, qid, qtext) in enumerate(question_columns):
             col_idx = org_col_count + i + 1
             answers = o["answers"].get((sec, qid), set())
@@ -351,52 +358,162 @@ def write_output(orgs: dict, questions: list[tuple], output_path: str):
 
         row_num += 1
 
-    # ── Style ──
-    style_sheet(ws, total_cols, len(orgs), section_spans)
-
-    # ── Freeze panes (freeze org columns + header rows) ──
+    apply_data_style(ws, 3, row_num - 1, total_cols)
     ws.freeze_panes = ws.cell(row=3, column=org_col_count + 1)
-
-    # ── Auto-filter ──
     ws.auto_filter.ref = f"A2:{get_column_letter(total_cols)}{row_num - 1}"
+    auto_fit_cols(ws, total_cols)
 
-    # ── Auto-fit column widths (sample first 200 rows) ──
-    for col_idx in range(1, total_cols + 1):
-        max_width = len(str(ws.cell(row=2, column=col_idx).value or ""))
-        for r in range(3, min(row_num, 203)):
-            cell_val = str(ws.cell(row=r, column=col_idx).value or "")
-            max_width = max(max_width, len(cell_val))
-        ws.column_dimensions[get_column_letter(col_idx)].width = min(max_width + 3, 50)
+    return question_columns
 
-    # ── Create a "Questions" reference sheet ──
-    ws2 = wb.create_sheet("Question Reference")
-    ws2.append(["Section", "Question ID", "Question #", "Question Text"])
+
+# ═══════════════════════════════════════════════════════════════════════════
+# SCORECARD SHEET
+# ═══════════════════════════════════════════════════════════════════════════
+
+def compute_section_scores(orgs: dict, questions: list[tuple]) -> dict:
+    """
+    For each org, compute the average score per section and overall.
+    Returns: dict[org_name] -> {
+        "section_scores": {section_name: average_score},
+        "overall_score": float,
+    }
+    """
+    # Build mapping: section -> list of question_ids
+    section_qids = defaultdict(list)
     for sec, qid, qnum, qtext in questions:
-        ws2.append([sec, qid, qnum, qtext])
-    # Style the reference sheet
-    for col in range(1, 5):
-        cell = ws2.cell(row=1, column=col)
-        cell.font = Font(name="Calibri", bold=True, size=11, color="FFFFFF")
-        cell.fill = PatternFill(start_color="2F5496", end_color="2F5496", fill_type="solid")
-        cell.alignment = Alignment(horizontal="center", vertical="center")
-    ws2.column_dimensions["A"].width = 40
-    ws2.column_dimensions["B"].width = 22
-    ws2.column_dimensions["C"].width = 12
-    ws2.column_dimensions["D"].width = 100
-    ws2.freeze_panes = "A2"
+        if sec in SCORECARD_SECTIONS:
+            section_qids[sec].append(qid)
 
-    wb.save(output_path)
-    print(f"✅ Done! Output written to: {output_path}")
-    print(f"   {len(orgs)} organisations × {len(question_columns)} questions")
-    print(f"   {len(section_spans)} sections as column groups")
-    print(f"   See 'Question Reference' sheet for question_id → question text mapping")
+    result = {}
+    for org_name, o in orgs.items():
+        section_scores = {}
+        all_scores = []
 
+        for sec in SCORECARD_SECTIONS:
+            sec_total = 0.0
+            sec_count = 0
+            for qid in section_qids.get(sec, []):
+                score_list = o["scores"].get((sec, qid), [])
+                if score_list:
+                    # Average across all participants for this question
+                    q_avg = sum(s for s, _ in score_list) / len(score_list)
+                    sec_total += q_avg
+                    sec_count += 1
+                    all_scores.extend(s for s, _ in score_list)
+
+            section_scores[sec] = round(sec_total / sec_count, 2) if sec_count > 0 else None
+
+        overall = round(sum(all_scores) / len(all_scores), 2) if all_scores else None
+        result[org_name] = {
+            "section_scores": section_scores,
+            "overall_score": overall,
+        }
+
+    return result
+
+
+def write_scorecard_sheet(wb, orgs: dict, questions: list[tuple]):
+    ws = wb.create_sheet("Scorecard")
+
+    score_data = compute_section_scores(orgs, questions)
+
+    # ── Headers ──
+    org_headers = [col[0] for col in OUTPUT_COLUMNS]
+    section_headers = SCORECARD_SECTIONS
+    all_headers = org_headers + section_headers + ["OVERALL"]
+
+    for col_idx, header in enumerate(all_headers, 1):
+        ws.cell(row=1, column=col_idx, value=header)
+
+    apply_header_style(ws, 1, len(all_headers))
+
+    # ── Data ──
+    row_num = 2
+    for org_name in sorted(orgs.keys()):
+        o = orgs[org_name]
+        sd = score_data.get(org_name, {})
+
+        list_values = {}
+        for key in ["role_level", "department", "age_band", "job_title"]:
+            vals = sorted(o["list"].get(key, set()))
+            list_values[key] = " | ".join(vals) if vals else ""
+
+        # Org-level columns
+        for col_idx, (_, key, agg_type) in enumerate(OUTPUT_COLUMNS, 1):
+            if agg_type == "single":
+                val = o["single"].get(key, "")
+            elif agg_type == "list":
+                val = list_values.get(key, "")
+            else:
+                val = ""
+            ws.cell(row=row_num, column=col_idx, value=val)
+
+        # Section scores
+        base_col = len(OUTPUT_COLUMNS)
+        for i, sec in enumerate(SCORECARD_SECTIONS):
+            score = sd.get("section_scores", {}).get(sec)
+            cell = ws.cell(row=row_num, column=base_col + i + 1)
+            if score is not None:
+                cell.value = score
+                cell.number_format = '0.00'
+
+        # Overall score
+        overall_cell = ws.cell(row=row_num, column=base_col + len(SCORECARD_SECTIONS) + 1)
+        overall = sd.get("overall_score")
+        if overall is not None:
+            overall_cell.value = overall
+            overall_cell.number_format = '0.00'
+            overall_cell.font = Font(name="Calibri", bold=True, size=10)
+
+        row_num += 1
+
+    total_cols = len(all_headers)
+    apply_data_style(ws, 2, row_num - 1, total_cols)
+
+    # ── Color scale on score columns (green = high, red = low) ──
+    score_start_col = len(OUTPUT_COLUMNS) + 1
+    score_end_col = total_cols
+    score_range = f"{get_column_letter(score_start_col)}2:{get_column_letter(score_end_col)}{row_num - 1}"
+    ws.conditional_formatting.add(
+        score_range,
+        ColorScaleRule(
+            start_type="min", start_color="F8696B",   # red
+            mid_type="percentile", mid_value=50, mid_color="FFEB84",  # yellow
+            end_type="max", end_color="63BE7B",        # green
+        ),
+    )
+
+    ws.freeze_panes = ws.cell(row=2, column=len(OUTPUT_COLUMNS) + 1)
+    ws.auto_filter.ref = f"A1:{get_column_letter(total_cols)}{row_num - 1}"
+    auto_fit_cols(ws, total_cols)
+
+
+# ═══════════════════════════════════════════════════════════════════════════
+# QUESTION REFERENCE SHEET
+# ═══════════════════════════════════════════════════════════════════════════
+
+def write_question_ref_sheet(wb, questions: list[tuple]):
+    ws = wb.create_sheet("Question Reference")
+    ws.append(["Section", "Question ID", "Question #", "Question Text"])
+    for sec, qid, qnum, qtext in questions:
+        ws.append([sec, qid, qnum, qtext])
+
+    apply_header_style(ws, 1, 4)
+    ws.column_dimensions["A"].width = 40
+    ws.column_dimensions["B"].width = 22
+    ws.column_dimensions["C"].width = 12
+    ws.column_dimensions["D"].width = 100
+    ws.freeze_panes = "A2"
+
+
+# ═══════════════════════════════════════════════════════════════════════════
+# MAIN
+# ═══════════════════════════════════════════════════════════════════════════
 
 def main():
     input_path = Path(INPUT_FILE)
     if not input_path.exists():
         print(f"❌ Input file not found: {INPUT_FILE}")
-        print("   Update INPUT_FILE in the CONFIG section of this script.")
         sys.exit(1)
 
     print(f"📂 Reading: {INPUT_FILE}")
@@ -411,7 +528,22 @@ def main():
     orgs = build_org_data(rows)
     print(f"   {len(orgs)} organisations found")
 
-    write_output(orgs, questions, OUTPUT_FILE)
+    wb = openpyxl.Workbook()
+
+    print("📊 Writing Pivot sheet...")
+    write_pivot_sheet(wb, orgs, questions)
+
+    print("📊 Writing Scorecard sheet...")
+    write_scorecard_sheet(wb, orgs, questions)
+
+    print("📊 Writing Question Reference sheet...")
+    write_question_ref_sheet(wb, questions)
+
+    wb.save(OUTPUT_FILE)
+    print(f"\n✅ Done! Output written to: {OUTPUT_FILE}")
+    print(f"   Pivot:        {len(orgs)} orgs × {len(questions)} questions")
+    print(f"   Scorecard:    {len(orgs)} orgs × {len(SCORECARD_SECTIONS)} sections + overall")
+    print(f"   Question Ref: {len(questions)} questions")
 
 
 if __name__ == "__main__":
