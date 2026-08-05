@@ -14,8 +14,16 @@
 # by following imports. Without this line the app builds cleanly and then fails at
 # export with FileNotFoundError. That is exactly what broke on 2026-08-05.
 
+import sys
+
+# All three icon files are rendered from icon.svg by make_icons.sh. PyInstaller wants
+# a .ico to embed in a Windows .exe and a .icns for a macOS bundle; icon.png is the
+# one Tk itself can load at runtime for the window icon, so it ships as data.
+EXE_ICON = 'icon.ico' if sys.platform == 'win32' else 'icon.icns'
+
 datas = [
     ('report_template.xlsx', '.'),
+    ('icon.png', '.'),
 ]
 
 hiddenimports = [
@@ -52,6 +60,7 @@ exe = EXE(
     upx=True,
     upx_exclude=[],
     console=False,
+    icon=EXE_ICON,
     disable_windowed_traceback=False,
     argv_emulation=False,
     target_arch=None,
@@ -72,7 +81,7 @@ coll = COLLECT(
 app = BUNDLE(
     coll,
     name='Super Filter.app',
-    icon=None,                      # supply an .icns here once one exists
+    icon='icon.icns',
     bundle_identifier='com.ammar.superfilter',
     info_plist={
         'CFBundleShortVersionString': '1.0.0',
