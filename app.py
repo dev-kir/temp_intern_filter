@@ -48,18 +48,20 @@ ALL_ORGS = "All organisations"
 
 # Display columns only. Every field is still written to the exported workbook.
 # (label, index in sf.ORG_HEADERS, width in px, anchor)
+# Widths here are MINIMUMS. Spare window width is handed to the tk.W columns in
+# proportion; if the window is narrower than the total, the table scrolls sideways.
 COLUMNS = [
-    ("Organisation name",   0, 280, tk.W),
-    ("Type",                1, 140, tk.W),
-    ("Resp",                2,  52, tk.CENTER),
-    ("Size",                5,  72, tk.CENTER),
-    ("Sector",              6, 120, tk.W),
-    ("Avg score",           8,  70, tk.CENTER),
-    ("Overall",             9,  76, tk.CENTER),
-    ("Strongest section",  10, 140, tk.W),
-    ("Weakest section",    11, 140, tk.W),
-    ("Agreement",          14,  86, tk.CENTER),
-    ("Maturity tier",      16, 112, tk.W),
+    ("Organisation name",   0, 300, tk.W),
+    ("Type",                1, 175, tk.W),
+    ("Resp",                2,  56, tk.CENTER),
+    ("Size",                5,  76, tk.CENTER),
+    ("Sector",              6, 145, tk.W),
+    ("Avg score",           8,  84, tk.CENTER),
+    ("Overall",             9,  80, tk.CENTER),
+    ("Strongest section",  10, 175, tk.W),
+    ("Weakest section",    11, 175, tk.W),
+    ("Agreement",          14,  96, tk.CENTER),
+    ("Maturity tier",      16, 134, tk.W),
 ]
 OVERALL_COL = 6       # index in COLUMNS for the Overall column
 RAW_OVERALL_IDX = 9  # index in sf.ORG_HEADERS for the Overall score value
@@ -125,71 +127,127 @@ def _cell(parent, text, width, anchor, bg, fg, font, cursor=None):
 
 
 class GridTable:
-    """Header row plus a scrolling body, both laid out from the same width list.
+    """A header pinned above a scrolling body, both driven by one width list.
 
-    Previously the header was one grid and every row was its own grid, so each
-    computed column widths independently from its own content and nothing lined up.
-    Widths now come only from COLUMNS and are enforced per cell.
+    Header and body live in two canvases that share a single horizontal scrollbar,
+    so the header slides with its columns but never scrolls away vertically. Column
+    widths in COLUMNS are MINIMUMS: spare window width is shared out among the
+    left-aligned columns, and if the window is too narrow the table scrolls sideways
+    instead of clipping. Resizing re-widths the existing cells in place, so the
+    window can be dragged without reloading the file.
     """
 
     def __init__(self, parent, columns, on_click=None):
         self.columns = columns
         self.on_click = on_click
-        self.total_width = sum(c[2] for c in columns)
+        self.min_widths = [c[2] for c in columns]
+        self.weights = [1 if c[3] == tk.W else 0 for c in columns]
+        self.widths = list(self.min_widths)
+        self.head_cells = []
+        self.row_cells = []
 
         outer = tk.Frame(parent, bg=WHITE)
         outer.pack(fill=tk.BOTH, expand=True)
+        outer.grid_rowconfigure(2, weight=1)
+        outer.grid_columnconfigure(0, weight=1)
 
-        # Header, pinned above the scrolling area
-        self.header = tk.Frame(outer, bg=WHITE, height=ROW_H)
-        self.header.pack(fill=tk.X, anchor="w")
-        self.header.pack_propagate(False)
-        self._draw_header()
+        self.head_canvas = tk.Canvas(outer, bg=WHITE, height=ROW_H,
+                                     highlightthickness=0, bd=0)
+        self.head_canvas.grid(row=0, column=0, sticky="ew")
+        self.header = tk.Frame(self.head_canvas, bg=WHITE)
+        self.head_canvas.create_window((0, 0), window=self.header, anchor="nw")
 
-        tk.Frame(outer, bg=LINE, height=1).pack(fill=tk.X)
+        tk.Frame(outer, bg=LINE, height=1).grid(row=1, column=0, columnspan=2, sticky="ew")
 
-        body_wrap = tk.Frame(outer, bg=WHITE)
-        body_wrap.pack(fill=tk.BOTH, expand=True)
-
-        self.canvas = tk.Canvas(body_wrap, bg=WHITE, highlightthickness=0, bd=0)
-        self.vsb = ttk.Scrollbar(body_wrap, orient=tk.VERTICAL, command=self.canvas.yview)
-        self.canvas.configure(yscrollcommand=self.vsb.set)
-        self.canvas.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
-        self.vsb.pack(side=tk.RIGHT, fill=tk.Y)
+        self.canvas = tk.Canvas(outer, bg=WHITE, highlightthickness=0, bd=0)
+        self.canvas.grid(row=2, column=0, sticky="nsew")
+        self.vsb = ttk.Scrollbar(outer, orient=tk.VERTICAL, command=self.canvas.yview)
+        self.vsb.grid(row=2, column=1, sticky="ns")
+        self.hsb = ttk.Scrollbar(outer, orient=tk.HORIZONTAL, command=self._xview)
+        self.hsb.grid(row=3, column=0, sticky="ew")
+        self.canvas.configure(yscrollcommand=self.vsb.set, xscrollcommand=self._on_xscroll)
 
         self.body = tk.Frame(self.canvas, bg=WHITE)
         self.body_id = self.canvas.create_window((0, 0), window=self.body, anchor="nw")
-        self.body.bind("<Configure>", self._on_body_configure)
+
+        self.body.bind("<Configure>", self._sync_regions)
         self.canvas.bind("<Configure>", self._on_canvas_configure)
-        self._bind_wheel(self.canvas)
+        self._draw_header()
+        self._bind_wheel()
 
-    def _on_body_configure(self, _event=None):
+    # ── scrolling ─────────────────────────────────────────────────────────
+    def _xview(self, *args):
+        """One horizontal scrollbar drives the body and the header together."""
+        self.canvas.xview(*args)
+        self.head_canvas.xview(*args)
+
+    def _on_xscroll(self, first, last):
+        self.hsb.set(first, last)
+        self.head_canvas.xview_moveto(first)
+
+    def _sync_regions(self, _event=None):
         self.canvas.configure(scrollregion=self.canvas.bbox("all"))
+        self.head_canvas.configure(scrollregion=self.head_canvas.bbox("all"))
 
-    def _on_canvas_configure(self, event):
-        # A frame placed with create_window keeps its own requested width, which for
-        # an empty container is 1px. Rows packed inside then have nothing to fill and
-        # collapse. Give it at least the width of the columns, more if the window is
-        # wider, so the row stripes run the full width.
-        self.canvas.itemconfigure(self.body_id, width=max(event.width, self.total_width))
-
-    def _bind_wheel(self, widget):
-        # macOS delivers small integer deltas; Windows and X11 send multiples of 120.
-        def on_wheel(e):
-            if e.num == 4:      delta = -3
-            elif e.num == 5:    delta = 3
-            elif abs(e.delta) >= 120: delta = int(-e.delta / 120) * 3
-            else:               delta = -e.delta
-            self.canvas.yview_scroll(int(delta), "units")
+    def _bind_wheel(self):
+        def on_wheel(e, axis="y"):
+            # Wheel and trackpad deltas differ per platform: X11 uses Button-4/5,
+            # Windows sends multiples of 120, macOS sends small numbers that can
+            # round to zero. Anything nonzero must move at least one row, or the
+            # table feels dead under a trackpad.
+            if e.num == 4:              step = -1
+            elif e.num == 5:            step = 1
+            elif abs(e.delta) >= 120:   step = int(-e.delta / 120)
+            else:                       step = -int(e.delta) if abs(e.delta) >= 1 else 0
+            if step == 0:
+                step = -1 if getattr(e, "delta", 0) > 0 else 1
+            if axis == "x":
+                self.canvas.xview_scroll(step, "units")
+                self.head_canvas.xview_scroll(step, "units")
+            else:
+                self.canvas.yview_scroll(step * 2, "units")
             return "break"
-        for seq in ("<MouseWheel>", "<Button-4>", "<Button-5>"):
-            widget.bind_all(seq, on_wheel)
 
+        for seq in ("<MouseWheel>", "<Button-4>", "<Button-5>"):
+            self.canvas.bind_all(seq, on_wheel)
+        # Shift+wheel is the conventional sideways scroll.
+        for seq in ("<Shift-MouseWheel>", "<Shift-Button-4>", "<Shift-Button-5>"):
+            self.canvas.bind_all(seq, lambda e: on_wheel(e, "x"))
+
+    # ── widths ────────────────────────────────────────────────────────────
+    def _on_canvas_configure(self, event):
+        avail = event.width
+        spare = max(0, avail - sum(self.min_widths))
+        wsum = sum(self.weights) or 1
+        widths, handed = [], 0
+        stretchy = [i for i, w in enumerate(self.weights) if w]
+        for i, (m, w) in enumerate(zip(self.min_widths, self.weights)):
+            if not w:
+                widths.append(m)
+                continue
+            share = spare // wsum if i != stretchy[-1] else spare - handed
+            handed += share
+            widths.append(m + share)
+        if widths != self.widths:
+            self.widths = widths
+            self._apply_widths()
+        self.canvas.itemconfigure(self.body_id, width=max(avail, sum(self.widths)))
+        self._sync_regions()
+
+    def _apply_widths(self):
+        for holder, w in zip(self.head_cells, self.widths):
+            holder.configure(width=w)
+        for cells in self.row_cells:
+            for holder, w in zip(cells, self.widths):
+                holder.configure(width=w)
+
+    # ── content ───────────────────────────────────────────────────────────
     def _draw_header(self):
-        for label, idx, width, anchor in self.columns:
+        for (label, idx, _w, anchor), width in zip(self.columns, self.widths):
             holder, lbl = _cell(self.header, label, width, anchor, WHITE, GREY,
                                 ("Calibri", 10, "bold"),
                                 cursor="hand2" if self.on_click else None)
+            self.head_cells.append(holder)
             if self.on_click:
                 for w in (holder, lbl):
                     w.bind("<Button-1>", lambda e, c=idx, l=label: self.on_click(c, l))
@@ -197,23 +255,25 @@ class GridTable:
     def set_rows(self, rows_data):
         for w in self.body.winfo_children():
             w.destroy()
+        self.row_cells = []
 
         for r, row in enumerate(rows_data):
             bg = STRIPE if r % 2 else WHITE
-            # No pack_propagate(False) here: the row takes its height from the cells
-            # and stretches to the body width, so the stripe runs the full row.
             rowframe = tk.Frame(self.body, bg=bg)
             rowframe.pack(fill=tk.X, anchor="w")
-            for i, (label, idx, width, anchor) in enumerate(self.columns):
+            cells = []
+            for i, ((label, idx, _w, anchor), width) in enumerate(zip(self.columns, self.widths)):
                 fg, font = TEXT, ("Calibri", 11)
                 if i == OVERALL_COL:
                     col = score_color(row[RAW_OVERALL_IDX])
                     if col is not None:
                         fg, font = col, ("Calibri", 11, "bold")
-                _cell(rowframe, fmt(row[idx], idx), width, anchor, bg, fg, font)
+                holder, _ = _cell(rowframe, fmt(row[idx], idx), width, anchor, bg, fg, font)
+                cells.append(holder)
+            self.row_cells.append(cells)
 
         self.body.update_idletasks()
-        self._on_body_configure()
+        self._sync_regions()
         self.canvas.yview_moveto(0)
 
 
